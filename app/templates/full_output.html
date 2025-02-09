@@ -6,9 +6,28 @@
 {% if error %}
   <div class="alert alert-danger">{{ error }}</div>
 {% else %}
-  <div class="form-group">
-    <label for="outputText">Kopierbaren Text anzeigen:</label>
-    <textarea id="outputText" class="form-control" rows="30" readonly>{{ combined_text }}</textarea>
+  <div class="position-relative" style="margin-bottom: 1rem;">
+    <!-- Kopieren-Button (immer oben rechts sichtbar im Container) -->
+    <button id="copyButton" class="btn btn-sm btn-info" 
+            style="position: absolute; top: 10px; right: 10px; z-index: 2;">
+      Kopieren
+    </button>
+    <div class="form-group">
+      <label for="outputText">Kopierbaren Text anzeigen:</label>
+      <textarea id="outputText" class="form-control" rows="30" readonly style="padding-top: 40px;">{{ combined_text }}</textarea>
+    </div>
   </div>
+  <script>
+    document.getElementById('copyButton').addEventListener('click', function() {
+      var outputText = document.getElementById('outputText');
+      outputText.select();
+      outputText.setSelectionRange(0, 99999); // Für mobile Geräte
+      navigator.clipboard.writeText(outputText.value).then(function() {
+          alert('Text wurde in die Zwischenablage kopiert!');
+      }, function(err) {
+          alert('Fehler beim Kopieren: ' + err);
+      });
+    });
+  </script>
 {% endif %}
 {% endblock %}

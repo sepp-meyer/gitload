@@ -21,7 +21,6 @@ def get_zip_full_output(repo_url, token, selected_paths=None):
         full_tree = {}
         selected_tree = {}
         
-        # Wenn keine Filterung erfolgt, gilt: Alle Dateien werden einbezogen.
         filter_all = (selected_paths is None)
 
         for file_info in zip_file.infolist():
@@ -30,7 +29,6 @@ def get_zip_full_output(repo_url, token, selected_paths=None):
             parts = [p for p in file_info.filename.split('/') if p]
             if not parts:
                 continue
-            # Aufbau des vollständigen Baums (full_tree)
             cur_full = full_tree
             for part in parts[:-1]:
                 if part not in cur_full:
@@ -45,7 +43,6 @@ def get_zip_full_output(repo_url, token, selected_paths=None):
                 cur_full[parts[-1]] = content
 
                 normalized_filename = file_info.filename.rstrip('/')
-                # Falls alle Dateien übernommen werden sollen oder der Dateipfad in selected_paths enthalten ist:
                 if filter_all or (normalized_filename in selected_paths):
                     cur_sel = selected_tree
                     for part in parts[:-1]:
@@ -76,7 +73,8 @@ def get_zip_full_output(repo_url, token, selected_paths=None):
                     text += f"{indent}/{key}\n"
                     text += format_tree_with_content(value, indent_level + 1)
                 else:
-                    text += f"{indent}- {key}: \n{indent}  {value}\n"
+                    # Inhalt in doppelte Anführungszeichen einklammern:
+                    text += f'{indent}- {key}: \n{indent}  "{value}"\n'
             return text
 
         structure_str = format_tree(full_tree)
