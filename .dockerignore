@@ -1,0 +1,25 @@
+# Ignoriere temporäre Python-Dateien
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# Ignoriere Jupyter Notebook-Checkpoints
+*.ipynb_checkpoints/
+
+# Ignoriere Logs und Umgebungsdateien
+*.log
+.env
+*.env
+
+# Ignoriere temporäre Dateien von Editoren
+*.swp
+*.swo
+*.tmp
+*.bak
+.DS_Store
+
+# Ignoriere andere übliche temporäre Dateien
+*.~*
+Thumbs.db
+
