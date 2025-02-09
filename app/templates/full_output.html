@@ -1,0 +1,14 @@
+<!-- app/templates/full_output.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Gesamtausgabe als Text</h2>
+{% if error %}
+  <div class="alert alert-danger">{{ error }}</div>
+{% else %}
+  <div class="form-group">
+    <label for="outputText">Kopierbaren Text anzeigen:</label>
+    <textarea id="outputText" class="form-control" rows="30" readonly>{{ combined_text }}</textarea>
+  </div>
+{% endif %}
+{% endblock %}

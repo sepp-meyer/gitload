@@ -65,3 +65,26 @@ def read_files():
         error = "Fehler beim Verarbeiten der ausgewählten Dateien."
         return render_template('read_files.html', error=error)
     return render_template('read_files.html', processed_files=processed_files)
+
+
+@app.route('/full_output', methods=['GET'])
+def full_output():
+    """
+    Diese Route erstellt eine kombinierte Textausgabe:
+    Zuerst den reinen Strukturbaum der ZIP-Datei,
+    dann eine Einsicht in alle Dateien (Dateiname und Inhalt).
+    """
+    token = session.get('token')
+    project_key = session.get('project')
+    if not token or not project_key:
+        return redirect(url_for('project'))
+    repo_url = projects.get(project_key)
+    structure_str, structure_with_content_str = utils.get_zip_structure_and_content(repo_url, token)
+    if structure_str is None:
+        error = "Fehler beim Laden oder Verarbeiten der ZIP-Datei."
+        return render_template('full_output.html', error=error)
+    combined_text = (
+        f"Struktur der ZIP-Datei:\n{structure_str}\n\n"
+        f"Einsicht in die Dateien:\n{structure_with_content_str}"
+    )
+    return render_template('full_output.html', combined_text=combined_text)
