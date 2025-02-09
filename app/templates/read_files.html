@@ -1,0 +1,23 @@
+<!-- app/templates/read_files.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Ausgelesene Dateien</h2>
+{% if error %}
+<div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+{% if processed_files %}
+    {% for path, content in processed_files.items() %}
+        <div class="card mb-3">
+            <div class="card-header">
+                {{ path }}
+            </div>
+            <div class="card-body">
+                <pre>{{ content }}</pre>
+            </div>
+        </div>
+    {% endfor %}
+{% else %}
+    <p>Keine Dateien ausgewählt oder keine Dateien gefunden.</p>
+{% endif %}
+{% endblock %}

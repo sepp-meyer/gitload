@@ -13,10 +13,4 @@
         {{ form.submit(class="btn btn-primary") }}
     </div>
 </form>
-
-{% if structure %}
-<hr>
-<h3>Struktur der ZIP-Datei:</h3>
-<textarea class="form-control" rows="20" readonly>{{ structure }}</textarea>
-{% endif %}
 {% endblock %}
