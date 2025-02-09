@@ -1,43 +1,44 @@
 # app/routes.py
-from flask import render_template, redirect, url_for, session, request
-from app import app
+from flask import Blueprint, render_template, redirect, url_for, session, request
 from app.forms import ProjectForm
 from app import utils
 import json
 
+bp = Blueprint('main', __name__)
+
 # Startseite: Falls ein Token hinterlegt ist, direkt zu /project, sonst zu /settings
-@app.route('/')
+@bp.route('/')
 def index():
     settings = utils.read_settings()
     if settings.get("token"):
-        return redirect(url_for('project'))
+        return redirect(url_for('main.project'))
     else:
-        return redirect(url_for('settings_page'))
+        return redirect(url_for('main.settings_page'))
 
-@app.route('/project', methods=['GET', 'POST'])
+@bp.route('/project', methods=['GET', 'POST'])
 def project():
     settings = utils.read_settings()
     token = settings.get("token", "")
     if not token:
-        return redirect(url_for('settings_page'))
+        return redirect(url_for('main.settings_page'))
     form = ProjectForm()
     projects_dict = settings.get("projects", {})
     form.project.choices = [(key, key) for key in sorted(projects_dict.keys())]
     if form.validate_on_submit():
         session["project"] = form.project.data
-        return redirect(url_for('select_files'))
+        return redirect(url_for('main.select_files'))
     return render_template("project.html", form=form)
 
-@app.route('/select_files', methods=['GET'])
+@bp.route('/select_files', methods=['GET'])
 def select_files():
     settings = utils.read_settings()
     token = settings.get("token", "")
     project_key = session.get('project')
     if not token or not project_key:
-        return redirect(url_for('project'))
+        return redirect(url_for('main.project'))
     repo_url = settings.get("projects", {}).get(project_key)
     if not repo_url:
-        return redirect(url_for('project'))
+        return redirect(url_for('main.project'))
     
     # Erhalte die Liste der Dateien (normalisierte Dateipfade)
     file_list = utils.get_flat_file_list(repo_url, token)
@@ -49,13 +50,13 @@ def select_files():
     
     return render_template('select_files.html', flat_list=flat_list, project=project_key)
 
-@app.route('/full_output', methods=['GET', 'POST'])
+@bp.route('/full_output', methods=['GET', 'POST'])
 def full_output():
     settings = utils.read_settings()
     token = settings.get("token", "")
     project_key = session.get('project')
     if not token or not project_key:
-        return redirect(url_for('project'))
+        return redirect(url_for('main.project'))
     repo_url = settings.get("projects", {}).get(project_key)
     if request.method == 'POST':
         selected_paths = request.form.getlist('selected_paths')
@@ -71,7 +72,7 @@ def full_output():
     )
     return render_template('full_output.html', combined_text=combined_text)
 
-@app.route('/settings', methods=['GET', 'POST'])
+@bp.route('/settings', methods=['GET', 'POST'])
 def settings_page():
     settings = utils.read_settings()
     if request.method == 'POST':
@@ -85,5 +86,5 @@ def settings_page():
         new_settings = {"token": new_token, "projects": projects}
         utils.write_settings(new_settings)
         session["token"] = new_token  # Token in der Session aktualisieren
-        return redirect(url_for("project"))
+        return redirect(url_for("main.project"))
     return render_template("settings.html", token=settings.get("token", ""), projects=settings.get("projects", {}))
