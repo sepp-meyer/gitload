@@ -3,6 +3,12 @@
 
 {% block content %}
 <h2>Dateien/Ordner auswählen für Projekt: {{ project }}</h2>
+
+<div class="mb-3">
+  <h4>Vollständige Struktur:</h4>
+  <pre>{{ structure_str }}</pre>
+</div>
+
 <form method="post" action="{{ url_for('full_output') }}">
     <div class="form-group">
         <!-- "Alle markieren" Checkbox -->
@@ -13,17 +19,17 @@
         <thead>
             <tr>
                 <th>Auswahl</th>
-                <th>Eintrag</th>
+                <th>Dateipfad</th>
             </tr>
         </thead>
         <tbody>
             {% for item in flat_list %}
             <tr>
                 <td>
-                    <input type="checkbox" name="selected_paths" value="{{ item.line }}" checked>
+                    <input type="checkbox" name="selected_paths" value="{{ item.filename }}" checked>
                 </td>
                 <td style="padding-left: {{ item.indent * 20 }}px;">
-                    {{ item.line }}
+                    {{ item.filename }}
                 </td>
             </tr>
             {% endfor %}
