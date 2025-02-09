@@ -8,7 +8,7 @@ from app.projects import projects
 @app.route('/', methods=['GET', 'POST'])
 def token():
     """
-    Route zur Eingabe des Git‑Tokens.
+    Token-Eingabe
     """
     form = TokenForm()
     if form.validate_on_submit():
@@ -19,7 +19,7 @@ def token():
 @app.route('/project', methods=['GET', 'POST'])
 def project():
     """
-    Route zur Projektauswahl.
+    Projektauswahl
     """
     token = session.get('token')
     if not token:
@@ -27,7 +27,6 @@ def project():
     form = ProjectForm()
     form.project.choices = [(key, key) for key in sorted(projects.keys())]
     if form.validate_on_submit():
-        # Speichere das ausgewählte Projekt in der Session
         session['project'] = form.project.data
         return redirect(url_for('select_files'))
     return render_template('project.html', form=form)
@@ -35,56 +34,82 @@ def project():
 @app.route('/select_files', methods=['GET'])
 def select_files():
     """
-    Zeigt die ZIP‑Struktur als Tabelle mit Auswahlkästchen.
+    Zeigt die ZIP-Struktur als Tabelle mit Auswahl-Checkboxen.
+    Hierbei ist jede Checkbox standardmäßig aktiviert (checked),
+    sodass per Default alle Dateien ausgewählt sind.
     """
     token = session.get('token')
     project_key = session.get('project')
     if not token or not project_key:
         return redirect(url_for('project'))
     repo_url = projects.get(project_key)
-    flat_structure = utils.get_flat_zip_structure(repo_url, token)
-    if flat_structure is None:
-        error = "Fehler beim Laden der ZIP‑Struktur."
-        return render_template('select_files.html', error=error)
-    return render_template('select_files.html', flat_structure=flat_structure, project=project_key)
+    # Nutze die Funktion, um eine flache Struktur zu erhalten (für die Anzeige)
+    flat_structure = utils.get_zip_full_output(repo_url, token)[0]  # Nur der Strukturbaum wird hier benötigt
+    # Für die Darstellung der Checkboxen bauen wir eine flache Liste aus dem Strukturbaum
+    # (Hierzu können wir wieder eine einfache Funktion verwenden.)
+    def flatten_tree(tree, parent=""):
+        items = []
+        for key, value in tree.items():
+            full_path = f"{parent}/{key}" if parent else key
+            # Falls value ein dict ist, handelt es sich um einen Ordner
+            items.append({
+                "path": full_path,
+                "name": key,
+                "is_dir": isinstance(value, dict),
+                "indent": full_path.count('/')
+            })
+            if isinstance(value, dict):
+                items.extend(flatten_tree(value, full_path))
+        return items
 
-@app.route('/read_files', methods=['POST'])
-def read_files():
-    """
-    Liest die Inhalte der vom Benutzer ausgewählten Dateien aus.
-    """
-    token = session.get('token')
-    project_key = session.get('project')
-    if not token or not project_key:
-        return redirect(url_for('project'))
-    repo_url = projects.get(project_key)
-    # Erhalte die Liste der ausgewählten Dateipfade aus dem Formular
-    selected_paths = request.form.getlist('selected_paths')
-    processed_files = utils.process_selected_files(repo_url, token, selected_paths)
-    if processed_files is None:
-        error = "Fehler beim Verarbeiten der ausgewählten Dateien."
-        return render_template('read_files.html', error=error)
-    return render_template('read_files.html', processed_files=processed_files)
+    # Baue die verschachtelte Struktur erneut auf, um sie flach anzuzeigen
+    # (Hierzu nutzen wir den gleichen Ansatz wie in der Utility-Funktion, aber nur für die Anzeige)
+    # Wir laden die komplette Struktur erneut:
+    structure_str, _ = utils.get_zip_full_output(repo_url, token)
+    # Nun konstruieren wir einen einfachen Baum als Dictionary (mit Hierarchie) – 
+    # alternativ könnte man eine eigene Funktion schreiben, hier nutzen wir eine vereinfachte Darstellung.
+    # Damit wir die Checkboxen pro Zeile anzeigen können, bauen wir eine Liste auf:
+    # Hinweis: Für eine exakte Hierarchie kannst du auch eine rekursive Funktion schreiben.
+    # Hier ein vereinfachtes Beispiel, das der ursprünglichen Lösung ähnelt:
+    import re
+    pattern = re.compile(r'^( *)(/|- )(.+)$', re.MULTILINE)
+    flat_list = []
+    for line in structure_str.splitlines():
+        m = pattern.match(line)
+        if m:
+            indent = len(m.group(1)) // 2
+            name = m.group(3)
+            # Erzeuge hier den "Pfad" anhand der Einrückung – in dieser einfachen Variante
+            # speichern wir die Zeile als "Pfad", damit sie später zur Filterung genutzt werden kann.
+            # In der finalen Ausgabe wird der Pfad dann wieder anhand des vollständigen Strukturbaums ermittelt.
+            flat_list.append({"line": line.strip(), "indent": indent, "path": line.strip().replace("/","").replace("-","").strip()})
+    # Falls keine sinnvolle flache Liste generiert wird, kann alternativ die ursprüngliche flat_structure genutzt werden.
+    # Hier zeigen wir aber die komplette Struktur als Tabelle an.
+    return render_template('select_files.html', flat_list=flat_list, project=project_key)
 
-
-@app.route('/full_output', methods=['GET'])
+@app.route('/full_output', methods=['GET', 'POST'])
 def full_output():
     """
-    Diese Route erstellt eine kombinierte Textausgabe:
-    Zuerst den reinen Strukturbaum der ZIP-Datei,
-    dann eine Einsicht in alle Dateien (Dateiname und Inhalt).
+    Erzeugt die kombinierte Textausgabe.
+    Wird diese Route per POST (von der Auswahlseite) aufgerufen,
+    werden die übermittelten (ausgewählten) Dateipfade genutzt.
+    Bei GET werden alle Dateien angezeigt.
     """
     token = session.get('token')
     project_key = session.get('project')
     if not token or not project_key:
         return redirect(url_for('project'))
     repo_url = projects.get(project_key)
-    structure_str, structure_with_content_str = utils.get_zip_structure_and_content(repo_url, token)
+    if request.method == 'POST':
+        selected_paths = request.form.getlist('selected_paths')
+    else:
+        selected_paths = None  # Alle Dateien anzeigen
+    structure_str, content_str = utils.get_zip_full_output(repo_url, token, selected_paths)
     if structure_str is None:
         error = "Fehler beim Laden oder Verarbeiten der ZIP-Datei."
         return render_template('full_output.html', error=error)
     combined_text = (
         f"Struktur der ZIP-Datei:\n{structure_str}\n\n"
-        f"Einsicht in die Dateien:\n{structure_with_content_str}"
+        f"Einsicht in die Dateien:\n{content_str}"
     )
     return render_template('full_output.html', combined_text=combined_text)

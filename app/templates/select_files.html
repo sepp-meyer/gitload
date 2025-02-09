@@ -3,43 +3,36 @@
 
 {% block content %}
 <h2>Dateien/Ordner auswählen für Projekt: {{ project }}</h2>
-{% if error %}
-<div class="alert alert-danger">{{ error }}</div>
-{% endif %}
-<form method="post" action="{{ url_for('read_files') }}">
+<form method="post" action="{{ url_for('full_output') }}">
     <div class="form-group">
         <!-- "Alle markieren" Checkbox -->
-        <input type="checkbox" id="select_all"> <label for="select_all">Alle markieren</label>
+        <input type="checkbox" id="select_all" checked> 
+        <label for="select_all">Alle markieren</label>
     </div>
     <table class="table table-bordered">
         <thead>
             <tr>
                 <th>Auswahl</th>
-                <th>Datei/Ordner</th>
+                <th>Eintrag</th>
             </tr>
         </thead>
         <tbody>
-            {% for item in flat_structure %}
+            {% for item in flat_list %}
             <tr>
                 <td>
-                    <input type="checkbox" name="selected_paths" value="{{ item.path }}">
+                    <input type="checkbox" name="selected_paths" value="{{ item.line }}" checked>
                 </td>
                 <td style="padding-left: {{ item.indent * 20 }}px;">
-                    {% if item.is_dir %}
-                        <strong>{{ item.name }}/</strong>
-                    {% else %}
-                        {{ item.name }}
-                    {% endif %}
-                    <small> ({{ item.path }})</small>
+                    {{ item.line }}
                 </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
-    <button type="submit" class="btn btn-primary">Ausgewählte Dateien auslesen</button>
+    <button type="submit" class="btn btn-primary">Gesamtausgabe anzeigen</button>
 </form>
 <script>
-    // JavaScript, um alle Checkboxen per "Alle markieren" zu steuern
+    // "Alle markieren" Checkbox steuert alle Einträge
     document.getElementById('select_all').addEventListener('change', function() {
         var checkboxes = document.querySelectorAll('input[name="selected_paths"]');
         for (var checkbox of checkboxes) {

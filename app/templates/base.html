@@ -4,11 +4,15 @@
 <head>
     <meta charset="UTF-8">
     <title>Projekt ZIP-Struktur</title>
-    <!-- Bootstrap CSS einbinden -->
+    <!-- Bootstrap CSS -->
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
 </head>
 <body>
 <div class="container mt-4">
+    <!-- Hauptmenü-Button -->
+    <div class="mb-3">
+        <a class="btn btn-secondary" href="{{ url_for('token') }}">Hauptmenü</a>
+    </div>
     {% block content %}
     {% endblock %}
 </div>
