@@ -1,0 +1,38 @@
+**/.ipynb_checkpoints/
+*.csv
+*.xlsx
+*.docx
+*.pdf
+*.txt
+*.json
+!alert_config.json
+*.db
+__pycache__/
+config_email.py
+
+requirements.txt
+
+*.ipynb_checkpoints/
+*.db
+*.sqlite3
+
+
+# Ignoriere Python-Cache-Dateien
+__pycache__/
+*.pyc
+*.pyo
+
+# Weitere temporäre Dateien oder Verzeichnisse, die ignoriert werden sollen
+*.log
+*.tmp
+*.env
+
+# fertige container sollen auch nicht auf github
+*.tar
+
+
+Word/
+
+
+
+

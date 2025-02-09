@@ -1,0 +1,22 @@
+<!-- app/templates/project.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Projekt auswählen</h2>
+<form method="post">
+    {{ form.hidden_tag() }}
+    <div class="form-group">
+        {{ form.project.label(class="form-label") }}
+        {{ form.project(class="form-control") }}
+    </div>
+    <div class="form-group">
+        {{ form.submit(class="btn btn-primary") }}
+    </div>
+</form>
+
+{% if structure %}
+<hr>
+<h3>Struktur der ZIP-Datei:</h3>
+<textarea class="form-control" rows="20" readonly>{{ structure }}</textarea>
+{% endif %}
+{% endblock %}
