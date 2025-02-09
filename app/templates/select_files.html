@@ -3,7 +3,7 @@
 
 {% block content %}
 <h2>Dateien/Ordner auswählen für Projekt: {{ project }}</h2>
-<form method="post" action="{{ url_for('full_output') }}">
+<form method="post" action="{{ url_for('main.full_output') }}">
     <div class="form-group">
         <!-- "Alle markieren" Checkbox -->
         <input type="checkbox" id="select_all" checked> 

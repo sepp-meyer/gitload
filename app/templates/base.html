@@ -11,8 +11,8 @@
 <div class="container mt-4">
     <!-- Navigationsleiste -->
     <div class="mb-3">
-        <a class="btn btn-secondary" href="{{ url_for('project') }}">Hauptmenü</a>
-        <a class="btn btn-secondary" href="{{ url_for('settings_page') }}">Einstellungen</a>
+        <a class="btn btn-secondary" href="{{ url_for('main.project') }}">Hauptmenü</a>
+        <a class="btn btn-secondary" href="{{ url_for('main.settings_page') }}">Einstellungen</a>
     </div>
     {% block content %}
     {% endblock %}
