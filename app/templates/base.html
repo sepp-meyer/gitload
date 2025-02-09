@@ -9,9 +9,10 @@
 </head>
 <body>
 <div class="container mt-4">
-    <!-- Hauptmenü-Button -->
+    <!-- Navigationsleiste -->
     <div class="mb-3">
-        <a class="btn btn-secondary" href="{{ url_for('token') }}">Hauptmenü</a>
+        <a class="btn btn-secondary" href="{{ url_for('project') }}">Hauptmenü</a>
+        <a class="btn btn-secondary" href="{{ url_for('settings_page') }}">Einstellungen</a>
     </div>
     {% block content %}
     {% endblock %}

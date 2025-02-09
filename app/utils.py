@@ -2,14 +2,16 @@
 import requests
 import zipfile
 import io
+import os
+import json
 
 def get_zip_full_output(repo_url, token, selected_paths=None):
     """
     Lädt die ZIP-Datei vom Repository herunter und erstellt:
       - structure_str: Den vollständigen Strukturbaum (alle Dateien/Ordner)
-      - content_str: Für die **ausgewählten** Dateien den Dateinamen und den (ausgelesenen) Inhalt.
-    
-    Falls selected_paths None ist, werden **alle** Dateien in den Inhaltsbereich übernommen.
+      - content_str: Für die **ausgewählten** Dateien (oder alle, wenn selected_paths None ist)
+                     den Dateinamen und den (ausgelesenen) Inhalt – wobei der Inhalt in doppelte
+                     Anführungszeichen eingeschlossen wird.
     """
     headers = {'Authorization': f'token {token}'}
     response = requests.get(repo_url, headers=headers)
@@ -20,7 +22,6 @@ def get_zip_full_output(repo_url, token, selected_paths=None):
         
         full_tree = {}
         selected_tree = {}
-        
         filter_all = (selected_paths is None)
 
         for file_info in zip_file.infolist():
@@ -103,3 +104,37 @@ def get_flat_file_list(repo_url, token):
         return file_list
     except zipfile.BadZipFile:
         return []
+
+### Funktionen zur Verwaltung der Einstellungen (Token und Projekte)
+
+def get_settings_file_path():
+    base_dir = os.path.dirname(__file__)
+    data_dir = os.path.join(base_dir, "data")
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+    return os.path.join(data_dir, "settings.json")
+
+def read_settings():
+    path = get_settings_file_path()
+    if not os.path.exists(path):
+        # Standard-Einstellungen, wenn die Datei noch nicht existiert
+        default = {"token": "", "projects": {}}
+        write_settings(default)
+        return default
+    with open(path, "r", encoding="utf-8") as f:
+        try:
+            data = json.load(f)
+            # Falls die Datei leer oder ungültig ist, setze data auf default
+            if not isinstance(data, dict):
+                raise ValueError("Settings file does not contain a dict.")
+            return data
+        except (json.JSONDecodeError, ValueError):
+            default = {"token": "", "projects": {}}
+            write_settings(default)
+            return default
+
+
+def write_settings(settings):
+    path = get_settings_file_path()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(settings, f, indent=4)
