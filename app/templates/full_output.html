@@ -2,32 +2,83 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2>Gesamtausgabe als Text</h2>
-{% if error %}
-  <div class="alert alert-danger">{{ error }}</div>
-{% else %}
-  <div class="position-relative" style="margin-bottom: 1rem;">
-    <!-- Kopieren-Button, oben rechts im Container -->
-    <button id="copyButton" class="btn btn-sm btn-info" 
-            style="position: absolute; top: 10px; right: 10px; z-index: 2;">
-      Kopieren
-    </button>
-    <div class="form-group">
-      <label for="outputText">Kopierbaren Text anzeigen:</label>
-      <textarea id="outputText" class="form-control" rows="30" readonly style="padding-top: 40px;">{{ combined_text }}</textarea>
+<h2>Ergebnisansicht</h2>
+
+<form method="post">
+  {# Re‑Submit Buttons #}
+  <input type="hidden" name="selected_paths" value="">
+  <div class="form-check mb-2">
+    <input class="form-check-input" type="checkbox"
+           id="with_analysis" name="with_analysis"
+           {% if analyse_flag %}checked{% endif %}>
+    <label class="form-check-label" for="with_analysis">
+      Funktionsübersicht mit anzeigen
+    </label>
+  </div>
+  <button class="btn btn-sm btn-primary mb-3">Ansicht neu erzeugen</button>
+</form>
+
+<!-- Tabs ------------------------------------------------------------->
+<ul class="nav nav-tabs" id="resultTab" role="tablist">
+  <li class="nav-item">
+    <a class="nav-link active" id="text-tab" data-toggle="tab"
+       href="#text" role="tab">Files als Text</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link" id="func-tab" data-toggle="tab"
+       href="#func" role="tab">Funktionsübersicht</a>
+  </li>
+</ul>
+
+<div class="tab-content border border-top-0 p-3" id="resultTabContent">
+  <!-- 1) Textansicht ------------------------------------------------->
+  <div class="tab-pane fade show active" id="text" role="tabpanel">
+    <div class="position-relative">
+      <button id="copyButton" class="btn btn-sm btn-info"
+              style="position:absolute; top:10px; right:10px;">
+        Kopieren
+      </button>
+      <textarea id="outputText" class="form-control" rows="30" readonly
+                style="padding-top:40px;">{{ combined_text }}</textarea>
     </div>
   </div>
-  <script>
-    document.getElementById('copyButton').addEventListener('click', function() {
-      var outputText = document.getElementById('outputText');
-      outputText.select();
-      outputText.setSelectionRange(0, 99999); // Für mobile Geräte
-      navigator.clipboard.writeText(outputText.value).then(function() {
-          alert('Text wurde in die Zwischenablage kopiert!');
-      }, function(err) {
-          alert('Fehler beim Kopieren: ' + err);
-      });
-    });
-  </script>
-{% endif %}
+
+  <!-- 2) Funktionsübersicht ----------------------------------------->
+  <div class="tab-pane fade" id="func" role="tabpanel">
+    {% if analysis_rows %}
+      <table class="table table-sm table-striped">
+        <thead>
+          <tr><th>Datei</th><th>Funktion / Element</th></tr>
+        </thead>
+        <tbody>
+          {% for r in analysis_rows %}
+            <tr>
+              <td>{{ r.file }}</td>
+              <td>{{ r.element }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="text-muted">
+        Keine Analyse durchgeführt oder keine Funktionen gefunden.
+        Aktiviere die Checkbox oberhalb und klicke erneut auf „Ansicht neu erzeugen“.
+      </p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Bootstrap‑JS (nur wenn nicht schon im base.html enthalten) -->
+<script src="https://code.jquery.com/jquery-3.3.1.slim.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+
+<script>
+  // Copy‑Button
+  document.getElementById('copyButton').addEventListener('click', () => {
+      const ta = document.getElementById('outputText');
+      ta.select(); ta.setSelectionRange(0, 99999);
+      navigator.clipboard.writeText(ta.value);
+  });
+</script>
 {% endblock %}
