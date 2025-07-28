@@ -1,9 +1,10 @@
 # app/routes.py
 from flask import Blueprint, render_template, redirect, url_for, session, request
+from typing import Dict
+from collections import defaultdict
 from app.forms import ProjectForm
 from app import utils
 import json
-from typing import Dict                         #  ← diese Zeile ergänzen
 
 bp = Blueprint('main', __name__)
 
@@ -54,8 +55,8 @@ def select_files():
 # Gesamtausgabe / Analyse
 @bp.route("/full_output", methods=["GET", "POST"])
 def full_output():
-    settings = utils.read_settings()
-    token = settings.get("token", "")
+    settings   = utils.read_settings()
+    token      = settings.get("token", "")
     project_key = session.get("project")
     if not token or not project_key:
         return redirect(url_for("main.project"))
@@ -65,10 +66,10 @@ def full_output():
     # ---------- Benutzer‑Optionen ----------------------------------
     if request.method == "POST":
         selected_paths = request.form.getlist("selected_paths")
-        analyse = "with_analysis" in request.form
+        analyse        = "with_analysis" in request.form
     else:
         selected_paths = None        # alle Dateien
-        analyse = False
+        analyse        = False
 
     # ---------- ZIP verarbeiten -----------------------------------
     structure_str, content_str, analysis_rows, code_tree = utils.get_zip_full_output(
@@ -77,39 +78,63 @@ def full_output():
     if structure_str is None:
         return render_template("full_output.html", error="Fehler beim Laden.")
 
-    # ---------- Markdown‑Tabelle (wie bisher) ----------------------
+    # ---------- Markdown‑Tabelle ----------------------------------
     if analysis_rows:
-        known = ["file", "func", "route", "class", "lineno"]
-        col_order = [c for c in known if c in analysis_rows[0]] or list(analysis_rows[0])
-        md_lines = [
+        known      = ["file", "func", "route", "class", "lineno"]
+        col_order  = [c for c in known if c in analysis_rows[0]] or list(analysis_rows[0])
+        md_lines   = [
             "| " + " | ".join(col_order) + " |",
             "| " + " | ".join(["---"] * len(col_order)) + " |",
+        ] + [
+            "| " + " | ".join(str(r.get(c, "")) for c in col_order) + " |"
+            for r in analysis_rows
         ]
-        for r in analysis_rows:
-            md_lines.append("| " + " | ".join(str(r.get(c, "")) for c in col_order) + " |")
         analysis_markdown = "\n".join(md_lines)
     else:
         col_order, analysis_markdown = [], ""
+        
+    # ---------- Code‑Baum (Ordner‑/Dateibaum) ----------------------
+    from collections import defaultdict
 
-    # ---------- Codebaum‑String -----------------------------------
-    def tree_to_str(tree: Dict) -> str:
-        lines = []
-        for file in sorted(tree):
-            short = file.split("/", 1)[-1]
-            info  = tree[file]
-            funcs = info.get("functions", {})
-            if not funcs:          # überspringen, wenn keine Funktionen
-                continue
-            lines.append(short)
-            for func, meta in funcs.items():
-                route = f"  route: {meta['route']}" if meta.get("route") else ""
-                lines.append(f"  • {func}(){route}")
-                for cal in meta.get("calls", []):
-                    lines.append(f"      → {cal}()")
-        return "\n".join(lines)
+    def build_dir_tree(flat: Dict) -> Dict:
+        """wandelt {'app/routes.py': info, …} in verschachtelten Dict‑Baum um"""
+        root: Dict = {}
+        for rel_path, info in flat.items():
+            parts = rel_path.split("/")
+            ptr   = root
+            for part in parts[:-1]:
+                ptr = ptr.setdefault(part, {})      # legt Unterdict an
+            ptr[parts[-1]] = info                   # Dateiknoten
+        return root
 
+    def fmt_dir(node: Dict, prefix: str = "") -> list[str]:
+        lines, keys = [], sorted(node.keys())
+        for idx, name in enumerate(keys):
+            is_last  = idx == len(keys) - 1
+            branch   = "└── " if is_last else "├── "
+            new_pref = prefix + ("    " if is_last else "│   ")
 
-    code_tree_str = tree_to_str(code_tree)
+            # Ordner?
+            if isinstance(node[name], dict) and "functions" not in node[name]:
+                lines.append(prefix + branch + name + "/")
+                lines.extend(fmt_dir(node[name], new_pref))
+            else:  # Datei
+                lines.append(prefix + branch + name)
+                funcs = node[name].get("functions", {})
+                fn_keys = list(funcs)
+                for jdx, func in enumerate(fn_keys):
+                    is_last_fn = jdx == len(fn_keys) - 1
+                    fn_branch  = "└── " if is_last_fn else "├── "
+                    route      = funcs[func].get("route")
+                    route_txt  = f"  route: {route}" if route else ""
+                    lines.append(
+                        new_pref + fn_branch + f"{func}(){route_txt}"
+                    )
+        return lines
+
+    dir_tree      = build_dir_tree(code_tree)
+    code_tree_str = "\n".join(fmt_dir(dir_tree))
+
 
     # ---------- Kombinierte Textausgabe ----------------------------
     combined_text = (
