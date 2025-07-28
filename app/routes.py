@@ -50,10 +50,11 @@ def select_files():
     
     return render_template('select_files.html', flat_list=flat_list, project=project_key)
 
-@bp.route('/full_output', methods=['GET', 'POST'])
+# Gesamtausgabe / Analyse
+@bp.route("/full_output", methods=["GET", "POST"])
 def full_output():
-    settings   = utils.read_settings()
-    token      = settings.get("token", "")
+    settings = utils.read_settings()
+    token = settings.get("token", "")
     project_key = session.get("project")
     if not token or not project_key:
         return redirect(url_for("main.project"))
@@ -63,10 +64,10 @@ def full_output():
     # ---------- Benutzer‑Optionen ----------------------------------
     if request.method == "POST":
         selected_paths = request.form.getlist("selected_paths")
-        analyse        = ("with_analysis" in request.form)
+        analyse = "with_analysis" in request.form
     else:
-        selected_paths = None       # alle Dateien
-        analyse        = False
+        selected_paths = None        # alle Dateien
+        analyse = False
 
     # ---------- ZIP verarbeiten -----------------------------------
     structure_str, content_str, analysis_rows = utils.get_zip_full_output(
@@ -75,26 +76,43 @@ def full_output():
     if structure_str is None:
         return render_template("full_output.html", error="Fehler beim Laden.")
 
+    # ---------- Markdown‑Tabelle dynamisch -------------------------
+    if analysis_rows:
+        known = ["file", "func", "route", "class", "lineno", "element"]
+        # nur Spalten, die tatsächlich vorkommen
+        col_order = [c for c in known if c in analysis_rows[0]]
+        if not col_order:
+            col_order = list(analysis_rows[0].keys())  # Fallback
+
+        md_lines = [
+            "| " + " | ".join(col_order) + " |",
+            "| " + " | ".join(["---"] * len(col_order)) + " |",
+        ]
+        for r in analysis_rows:
+            md_lines.append(
+                "| "
+                + " | ".join(str(r.get(c, "")) for c in col_order)
+                + " |"
+            )
+        analysis_markdown = "\n".join(md_lines)
+    else:
+        col_order = []
+        analysis_markdown = ""
+
+    # ---------- Kombinierte Textausgabe ----------------------------
     combined_text = (
         f"Struktur der ZIP-Datei:\n{structure_str}\n\n"
         f"Einsicht in die Dateien:\n{content_str}"
     )
 
-    # ---------- Markdown‑Tabelle für Copy‑Button -------------------
-    if analysis_rows:
-        md_lines = ["| Datei | Funktion |", "|------|-----------|"]
-        md_lines += [f"| {r['file']} | {r['element']} |" for r in analysis_rows]
-        analysis_markdown = "\n".join(md_lines)
-    else:
-        analysis_markdown = ""
-
     # ---------- Render‑Template -----------------------------------
     return render_template(
         "full_output.html",
-        combined_text     = combined_text,
-        analysis_rows     = analysis_rows,
-        analysis_markdown = analysis_markdown,   # für Copy‑Button im Tab
-        analyse_flag      = analyse              # Checkbox‑Status
+        combined_text=combined_text,
+        analysis_rows=analysis_rows,
+        analysis_markdown=analysis_markdown,
+        col_order=col_order,
+        analyse_flag=analyse,
     )
 
 

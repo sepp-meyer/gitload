@@ -19,6 +19,7 @@ class BaseAnalyzer:
 
 
 # ───────── Python ────────────────────────────────────────────────────
+# app/analyzer.py
 class PythonAnalyzer(BaseAnalyzer):
     def analyse(self, rel_path: str, text: str) -> List[Dict]:
         try:
@@ -26,11 +27,47 @@ class PythonAnalyzer(BaseAnalyzer):
         except SyntaxError:
             return []
 
-        out: List[Dict] = []
+        rows: List[Dict] = []
+
         for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                out.append({"file": rel_path, "element": node.name})
-        return out
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+
+            # ───── Grunddaten ───────────────────────────────
+            entry = {
+                "file":    rel_path,
+                "func":    node.name,
+                "route":   "",          # wird evtl. gefüllt
+                "class":   self._enclosing_class(node),
+                "lineno":  node.lineno,
+            }
+
+            # ───── Decorators untersuchen (Flask‑Routen) ────
+            for dec in node.decorator_list:
+                # Fälle: @bp.route("/x"), @app.route("/x", ...)
+                if isinstance(dec, ast.Call) and getattr(dec.func, "attr", "") == "route":
+                    # Erste Positional‑Args einsammeln (können mehrere sein)
+                    paths = []
+                    for arg in dec.args:
+                        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                            paths.append(arg.value)
+                    entry["route"] = ", ".join(paths)
+                    break   # reicht, wir nehmen nur die erste Route
+
+            rows.append(entry)
+
+        return rows
+
+    # ───────────────────────────────────────────────────────
+    def _enclosing_class(self, node: ast.AST) -> str:
+        """Falls die Funktion innerhalb einer Klasse liegt, gebe Klassennamen zurück."""
+        parent = getattr(node, "parent", None)
+        while parent:
+            if isinstance(parent, ast.ClassDef):
+                return parent.name
+            parent = getattr(parent, "parent", None)
+        return ""
+
 
 
 # ───────── CSS  (Selektoren → „Funktion“) ────────────────────────────
@@ -48,7 +85,8 @@ class CSSAnalyzer(BaseAnalyzer):
 # ───────── Mapping / Registry ────────────────────────────────────────
 REGISTRY = defaultdict(BaseAnalyzer)   # Fallback
 REGISTRY.update({
-    ".py":  PythonAnalyzer(),
-    ".css": CSSAnalyzer(),
+    ".py": PythonAnalyzer(),
+    # ".css": CSSAnalyzer(),   # vorerst auskommentiert
     # später: ".js": JsAnalyzer(), ".html": HtmlAnalyzer(), …
 })
+
