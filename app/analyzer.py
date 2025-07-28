@@ -1,8 +1,9 @@
 # app/analyzer.py
 """
 Sammlung von Analyzer‑Klassen.
-Jede Klasse liefert eine Liste von Dicts mit mind.:
-    {file: str, element: str}
+Jede Klasse liefert
+    1) eine flache Liste von Dicts  → Tabellenansicht
+    2) eine Baum‑Struktur           → Codebaum‑Ansicht
 """
 
 from __future__ import annotations
@@ -13,14 +14,19 @@ from typing import List, Dict
 
 
 class BaseAnalyzer:
+    # ---- Tabellen‑Analyse (bestehend) -----------------------------
     def analyse(self, rel_path: str, text: str) -> List[Dict]:
-        """Default: nichts erkennen."""
         return []
 
+    # ---- Baum‑Analyse (neu) ---------------------------------------
+    def analyse_tree(self, rel_path: str, text: str) -> Dict:
+        return {}
 
-# ───────── Python ────────────────────────────────────────────────────
-# app/analyzer.py
+
+# ───────── Python ──────────────────────────────────────────────────
 class PythonAnalyzer(BaseAnalyzer):
+
+    # ---------------- Tabelle --------------------------------------
     def analyse(self, rel_path: str, text: str) -> List[Dict]:
         try:
             tree = ast.parse(text)
@@ -28,65 +34,86 @@ class PythonAnalyzer(BaseAnalyzer):
             return []
 
         rows: List[Dict] = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                rows.append({
+                    "file":   rel_path,
+                    "func":   node.name,
+                    "route":  self._extract_route(node.decorator_list),
+                    "class":  self._enclosing_class(node),
+                    "lineno": node.lineno,
+                })
+        return rows
+
+    # ---------------- Baum -----------------------------------------
+    def analyse_tree(self, rel_path: str, text: str) -> Dict:
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            return {}
+
+        # Parent‑Links für Klassenermittlung
+        for parent in ast.walk(tree):
+            for child in ast.iter_child_nodes(parent):
+                child.parent = parent
+
+        out: Dict = {"functions": {}}
 
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
 
-            # ───── Grunddaten ───────────────────────────────
-            entry = {
-                "file":    rel_path,
-                "func":    node.name,
-                "route":   "",          # wird evtl. gefüllt
-                "class":   self._enclosing_class(node),
-                "lineno":  node.lineno,
+            meta = {
+                "route": self._extract_route(node.decorator_list),
+                "calls": self._collect_calls(node),
             }
+            out["functions"][node.name] = meta
 
-            # ───── Decorators untersuchen (Flask‑Routen) ────
-            for dec in node.decorator_list:
-                # Fälle: @bp.route("/x"), @app.route("/x", ...)
-                if isinstance(dec, ast.Call) and getattr(dec.func, "attr", "") == "route":
-                    # Erste Positional‑Args einsammeln (können mehrere sein)
-                    paths = []
-                    for arg in dec.args:
-                        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                            paths.append(arg.value)
-                    entry["route"] = ", ".join(paths)
-                    break   # reicht, wir nehmen nur die erste Route
+        return out
 
-            rows.append(entry)
+    # ---------------- Hilfs­methoden -------------------------------
+    def _extract_route(self, decorators):
+        for dec in decorators:
+            if isinstance(dec, ast.Call) and getattr(dec.func, "attr", "") == "route":
+                for arg in dec.args:
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                        return arg.value
+        return ""
 
-        return rows
+    def _collect_calls(self, func_node):
+        called = set()
+        for sub in ast.walk(func_node):
+            if isinstance(sub, ast.Call):
+                tgt = sub.func
+                if isinstance(tgt, ast.Name):
+                    called.add(tgt.id)
+                elif isinstance(tgt, ast.Attribute):
+                    called.add(tgt.attr)
+        return sorted(called)
 
-    # ───────────────────────────────────────────────────────
-    def _enclosing_class(self, node: ast.AST) -> str:
-        """Falls die Funktion innerhalb einer Klasse liegt, gebe Klassennamen zurück."""
-        parent = getattr(node, "parent", None)
-        while parent:
-            if isinstance(parent, ast.ClassDef):
-                return parent.name
-            parent = getattr(parent, "parent", None)
+    def _enclosing_class(self, node):
+        p = getattr(node, "parent", None)
+        while p:
+            if isinstance(p, ast.ClassDef):
+                return p.name
+            p = getattr(p, "parent", None)
         return ""
 
 
-
-# ───────── CSS  (Selektoren → „Funktion“) ────────────────────────────
+# ───────── CSS  (Selektoren → „Funktion“) ──────────────────────────
 class CSSAnalyzer(BaseAnalyzer):
-    # alles links von {            (kein Super‑Parser, reicht hier)
     _sel = re.compile(r"^\s*([^{]+?)\s*\{", re.MULTILINE)
-
     def analyse(self, rel_path: str, text: str) -> List[Dict]:
         return [
-            {"file": rel_path, "element": m.group(1).strip()}
+            {"file": rel_path, "func": m.group(1).strip()}
             for m in self._sel.finditer(text)
         ]
+    # CSS‑Dateien bekommen keinen Codebaum – daher kein analyse_tree()
 
 
-# ───────── Mapping / Registry ────────────────────────────────────────
-REGISTRY = defaultdict(BaseAnalyzer)   # Fallback
+# ───────── Mapping / Registry ───────────────────────────────────────
+REGISTRY = defaultdict(BaseAnalyzer)
 REGISTRY.update({
     ".py": PythonAnalyzer(),
-    # ".css": CSSAnalyzer(),   # vorerst auskommentiert
-    # später: ".js": JsAnalyzer(), ".html": HtmlAnalyzer(), …
+    # ".css": CSSAnalyzer(),   # erst später wieder aktivieren
 })
-

@@ -28,6 +28,10 @@
     <a class="nav-link" id="func-tab" data-toggle="tab"
        href="#func" role="tab">Funktionsübersicht</a>
   </li>
+  <li class="nav-item">
+    <a class="nav-link" id="tree-tab" data-toggle="tab"
+       href="#tree" role="tab">Codebaum</a>
+  </li>
 </ul>
 
 <div class="tab-content border border-top-0 p-3" id="resultTabContent">
@@ -53,7 +57,6 @@
           Tabelle kopieren
         </button>
 
-        <!-- eigentliche Tabelle -->
         <table class="table table-sm table-striped">
           <thead>
             <tr>{% for c in cols %}<th>{{ c|capitalize }}</th>{% endfor %}</tr>
@@ -77,6 +80,21 @@
       </p>
     {% endif %}
   </div>
+
+  <!-- 3) Codebaum -------------------------------------------------- -->
+  <div class="tab-pane fade" id="tree" role="tabpanel">
+    {% if code_tree_str %}
+      <div class="position-relative">
+        <button id="copyTreeBtn" class="btn btn-sm btn-info"
+                style="position:absolute; top:10px; right:10px;">
+          Kopieren
+        </button>
+        <pre id="treeText" class="small">{{ code_tree_str }}</pre>
+      </div>
+    {% else %}
+      <p class="text-muted">Keine Analyse durchgeführt.</p>
+    {% endif %}
+  </div>
 </div>
 
 <!-- Bootstrap‑JS (nur wenn nicht schon im base.html enthalten) -->
@@ -93,7 +111,7 @@
   });
 
   // Copy‑Button (Funktionstabelle)
-  const copyFuncBtn  = document.getElementById('copyFuncBtn');
+  const copyFuncBtn = document.getElementById('copyFuncBtn');
   if (copyFuncBtn){
     copyFuncBtn.addEventListener('click', () => {
       const ta = document.getElementById('funcCopyArea');
@@ -101,6 +119,18 @@
       navigator.clipboard.writeText(ta.value.trim()).then(() => {
           copyFuncBtn.textContent = "✔️ Kopiert!";
           setTimeout(()=> copyFuncBtn.textContent = "Tabelle kopieren", 2000);
+      });
+    });
+  }
+
+  // Copy‑Button (Codebaum)
+  const copyTreeBtn = document.getElementById('copyTreeBtn');
+  if (copyTreeBtn){
+    copyTreeBtn.addEventListener('click', () => {
+      const txt = document.getElementById('treeText').innerText;
+      navigator.clipboard.writeText(txt).then(() => {
+          copyTreeBtn.textContent = "✔️ Kopiert!";
+          setTimeout(()=> copyTreeBtn.textContent = "Kopieren", 2000);
       });
     });
   }

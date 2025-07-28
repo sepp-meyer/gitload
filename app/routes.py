@@ -3,6 +3,7 @@ from flask import Blueprint, render_template, redirect, url_for, session, reques
 from app.forms import ProjectForm
 from app import utils
 import json
+from typing import Dict                         #  ← diese Zeile ergänzen
 
 bp = Blueprint('main', __name__)
 
@@ -70,34 +71,45 @@ def full_output():
         analyse = False
 
     # ---------- ZIP verarbeiten -----------------------------------
-    structure_str, content_str, analysis_rows = utils.get_zip_full_output(
+    structure_str, content_str, analysis_rows, code_tree = utils.get_zip_full_output(
         repo_url, token, selected_paths, analyse=analyse
     )
     if structure_str is None:
         return render_template("full_output.html", error="Fehler beim Laden.")
 
-    # ---------- Markdown‑Tabelle dynamisch -------------------------
+    # ---------- Markdown‑Tabelle (wie bisher) ----------------------
     if analysis_rows:
-        known = ["file", "func", "route", "class", "lineno", "element"]
-        # nur Spalten, die tatsächlich vorkommen
-        col_order = [c for c in known if c in analysis_rows[0]]
-        if not col_order:
-            col_order = list(analysis_rows[0].keys())  # Fallback
-
+        known = ["file", "func", "route", "class", "lineno"]
+        col_order = [c for c in known if c in analysis_rows[0]] or list(analysis_rows[0])
         md_lines = [
             "| " + " | ".join(col_order) + " |",
             "| " + " | ".join(["---"] * len(col_order)) + " |",
         ]
         for r in analysis_rows:
-            md_lines.append(
-                "| "
-                + " | ".join(str(r.get(c, "")) for c in col_order)
-                + " |"
-            )
+            md_lines.append("| " + " | ".join(str(r.get(c, "")) for c in col_order) + " |")
         analysis_markdown = "\n".join(md_lines)
     else:
-        col_order = []
-        analysis_markdown = ""
+        col_order, analysis_markdown = [], ""
+
+    # ---------- Codebaum‑String -----------------------------------
+    def tree_to_str(tree: Dict) -> str:
+        lines = []
+        for file in sorted(tree):
+            short = file.split("/", 1)[-1]
+            info  = tree[file]
+            funcs = info.get("functions", {})
+            if not funcs:          # überspringen, wenn keine Funktionen
+                continue
+            lines.append(short)
+            for func, meta in funcs.items():
+                route = f"  route: {meta['route']}" if meta.get("route") else ""
+                lines.append(f"  • {func}(){route}")
+                for cal in meta.get("calls", []):
+                    lines.append(f"      → {cal}()")
+        return "\n".join(lines)
+
+
+    code_tree_str = tree_to_str(code_tree)
 
     # ---------- Kombinierte Textausgabe ----------------------------
     combined_text = (
@@ -108,11 +120,12 @@ def full_output():
     # ---------- Render‑Template -----------------------------------
     return render_template(
         "full_output.html",
-        combined_text=combined_text,
-        analysis_rows=analysis_rows,
-        analysis_markdown=analysis_markdown,
-        col_order=col_order,
-        analyse_flag=analyse,
+        combined_text     = combined_text,
+        analysis_rows     = analysis_rows,
+        analysis_markdown = analysis_markdown,
+        col_order         = col_order,
+        code_tree_str     = code_tree_str,
+        analyse_flag      = analyse,
     )
 
 

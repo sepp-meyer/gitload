@@ -25,32 +25,24 @@ def get_zip_full_output(
     token: str,
     selected_paths: List[str] | None = None,
     analyse: bool = False,
-) -> Tuple[str, str, List[Dict]]:
-    """Lädt ein Git‑ZIP, bereitet Text‑/Strukturansicht auf
-    und liefert optional eine Funktions‑Analyse.
-
-    Rückgabe:
-        structure_str   – Verzeichnisbaum (String)
-        content_str     – Ausgewählte Dateien inkl. Inhalt
-        analysis_rows   – Liste von Dicts (eine Zeile je Fund)
+) -> Tuple[str, str, List[Dict], Dict]:
+    """
+    Rückgabe‑Tuple:
+        structure_str, content_str, analysis_rows, code_tree
     """
     headers = {"Authorization": f"token {token}"}
-
-    # ───── Download mit Timeout + Fehlerfang ───────────────────────
     try:
         response = requests.get(repo_url, headers=headers, timeout=15)
         response.raise_for_status()
     except RequestException as exc:
-        # Verbindung schlug fehl oder Server lieferte Fehlercode
         print(f"[gitload] Download‑Fehler: {exc}")
-        return None, None, []
+        return None, None, [], {}
 
     try:
         zip_file = zipfile.ZipFile(io.BytesIO(response.content))
         full_tree, selected_tree = {}, {}
         filter_all = selected_paths is None
 
-        # ───────── Dateien sammeln ─────────────────────────────────
         for info in zip_file.infolist():
             if info.filename in ("", "/"):
                 continue
@@ -77,7 +69,7 @@ def get_zip_full_output(
                     cur_sel = cur_sel.setdefault(part, {})
                 cur_sel[parts[-1]] = content
 
-        # ───────── Baum → String ───────────────────────────────────
+        # ---------- Strings für die ersten beiden Tabs --------------
         def fmt(tree, lvl=0):
             out, ind = "", "  " * lvl
             for k, v in tree.items():
@@ -99,25 +91,26 @@ def get_zip_full_output(
         structure_str = fmt(full_tree)
         content_str   = fmt_with_content(selected_tree)
 
-        # ───────── Analyse‑Phase (nur .py via REGISTRY) ────────────
+        # ---------- Analyse + Codebaum ------------------------------
         analysis_rows: List[Dict] = []
-        if analyse:
-            from app.analyzer import REGISTRY  # lokale Registry
+        code_tree: Dict = {}
 
+        if analyse:
+            from app.analyzer import REGISTRY
             for rel_path, text in _iterate_files_with_content(full_tree):
                 suffix = Path(rel_path).suffix.lower()
-                analysis_rows.extend(
-                    REGISTRY[suffix].analyse(rel_path, text)
-                )
+                analyzer = REGISTRY[suffix]
+                analysis_rows.extend(analyzer.analyse(rel_path, text))
+                if hasattr(analyzer, "analyse_tree"):
+                    code_tree[rel_path] = analyzer.analyse_tree(rel_path, text)
 
-            # Für besseres UI: sortieren nach Datei & Zeile
             analysis_rows.sort(key=lambda r: (r["file"], r.get("lineno", 0)))
 
-        return structure_str, content_str, analysis_rows
+        return structure_str, content_str, analysis_rows, code_tree
 
     except zipfile.BadZipFile:
         print("[gitload] ZIP‑Datei fehlerhaft oder leer")
-        return None, None, []
+        return None, None, [], {}
 
 def get_flat_file_list(repo_url, token):
     """
