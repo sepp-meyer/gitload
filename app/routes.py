@@ -50,42 +50,53 @@ def select_files():
     
     return render_template('select_files.html', flat_list=flat_list, project=project_key)
 
-# app/routes.py  – innerhalb full_output()
-
 @bp.route('/full_output', methods=['GET', 'POST'])
 def full_output():
-    settings = utils.read_settings()
-    token = settings.get("token", "")
-    project_key = session.get('project')
+    settings   = utils.read_settings()
+    token      = settings.get("token", "")
+    project_key = session.get("project")
     if not token or not project_key:
-        return redirect(url_for('main.project'))
+        return redirect(url_for("main.project"))
+
     repo_url = settings.get("projects", {}).get(project_key)
 
-    # Benutzer‑Auswahl (Checkboxen) ------------------------
-    if request.method == 'POST':
-        selected_paths = request.form.getlist('selected_paths')
-        analyse = ('with_analysis' in request.form)
+    # ---------- Benutzer‑Optionen ----------------------------------
+    if request.method == "POST":
+        selected_paths = request.form.getlist("selected_paths")
+        analyse        = ("with_analysis" in request.form)
     else:
-        selected_paths = None
-        analyse = False
+        selected_paths = None       # alle Dateien
+        analyse        = False
 
+    # ---------- ZIP verarbeiten -----------------------------------
     structure_str, content_str, analysis_rows = utils.get_zip_full_output(
         repo_url, token, selected_paths, analyse=analyse
     )
     if structure_str is None:
-        return render_template('full_output.html', error="Fehler beim Laden.")
+        return render_template("full_output.html", error="Fehler beim Laden.")
 
     combined_text = (
         f"Struktur der ZIP-Datei:\n{structure_str}\n\n"
         f"Einsicht in die Dateien:\n{content_str}"
     )
 
+    # ---------- Markdown‑Tabelle für Copy‑Button -------------------
+    if analysis_rows:
+        md_lines = ["| Datei | Funktion |", "|------|-----------|"]
+        md_lines += [f"| {r['file']} | {r['element']} |" for r in analysis_rows]
+        analysis_markdown = "\n".join(md_lines)
+    else:
+        analysis_markdown = ""
+
+    # ---------- Render‑Template -----------------------------------
     return render_template(
-        'full_output.html',
-        combined_text=combined_text,
-        analysis_rows=analysis_rows,
-        analyse_flag=analyse          # für Reiter‑Aktivierung
+        "full_output.html",
+        combined_text     = combined_text,
+        analysis_rows     = analysis_rows,
+        analysis_markdown = analysis_markdown,   # für Copy‑Button im Tab
+        analyse_flag      = analyse              # Checkbox‑Status
     )
+
 
 
 @bp.route('/settings', methods=['GET', 'POST'])

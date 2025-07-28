@@ -46,19 +46,27 @@
   <!-- 2) Funktionsübersicht ----------------------------------------->
   <div class="tab-pane fade" id="func" role="tabpanel">
     {% if analysis_rows %}
-      <table class="table table-sm table-striped">
-        <thead>
-          <tr><th>Datei</th><th>Funktion / Element</th></tr>
-        </thead>
-        <tbody>
-          {% for r in analysis_rows %}
-            <tr>
-              <td>{{ r.file }}</td>
-              <td>{{ r.element }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      <div class="position-relative">
+        <button id="copyFuncBtn" class="btn btn-sm btn-info"
+                style="position:absolute; top:10px; right:10px;">
+          Tabelle kopieren
+        </button>
+
+        <!-- eigentliche Tabelle -->
+        <table class="table table-sm table-striped">
+          <thead><tr><th>Datei</th><th>Funktion / Element</th></tr></thead>
+          <tbody>
+            {% for r in analysis_rows %}
+              <tr><td>{{ r.file }}</td><td>{{ r.element }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+
+        <!-- verstecktes <textarea> mit der Markdown‑Version -->
+        <textarea id="funcCopyArea" style="position:absolute; left:-9999px;">
+{{ analysis_markdown }}
+        </textarea>
+      </div>
     {% else %}
       <p class="text-muted">
         Keine Analyse durchgeführt oder keine Funktionen gefunden.
@@ -80,5 +88,24 @@
       ta.select(); ta.setSelectionRange(0, 99999);
       navigator.clipboard.writeText(ta.value);
   });
+
+  // --- Funktions‑Copy‑Button (Markdown) ----------------------------
+  const copyFuncBtn  = document.getElementById('copyFuncBtn');
+  if (copyFuncBtn){
+    copyFuncBtn.addEventListener('click', () => {
+      const ta = document.getElementById('funcCopyArea');
+      ta.select(); ta.setSelectionRange(0, 99999);
+      navigator.clipboard.writeText(ta.value.trim()).then(() => {
+          copyFuncBtn.textContent = "✔️ Kopiert!";
+          setTimeout(()=> copyFuncBtn.textContent = "Tabelle kopieren", 2000);
+      });
+    });
+  }
+
+  /*  Falls du zusätzlich einen JSON‑Button willst:
+      1) analysis_rows als JSON via |tojson filter ans Template geben
+      2) Analogen Button + Event‑Listener hinzufügen                */
 </script>
+
+
 {% endblock %}
