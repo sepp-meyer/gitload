@@ -1,173 +1,251 @@
 # app/routes.py
-from flask import Blueprint, render_template, redirect, url_for, session, request
-from typing import Dict
+from pathlib import Path
+from flask import (
+    Blueprint, render_template, redirect, url_for,
+    session, request
+)
+from typing import Dict, List
 from collections import defaultdict
 from app.forms import ProjectForm
 from app import utils
-import json
 
-bp = Blueprint('main', __name__)
+bp = Blueprint("main", __name__)
 
-# Startseite: Falls ein Token hinterlegt ist, direkt zu /project, sonst zu /settings
-@bp.route('/')
+# ──────────────────────────────────────────────────────────────────
+# Hilfs-Funktion: PlantUML-Script im Package/Component-Stil
+# ──────────────────────────────────────────────────────────────────
+def build_package_uml(code_tree: Dict[str, dict],
+                      imports_rows: List[dict]) -> str:
+    """Erzeugt ein übersichtliches UML-Diagramm wie im Quick-Test-Beispiel."""
+
+    def esc(txt: str) -> str:
+        return txt.replace(".", "_").replace("/", "__")
+
+    def trim(rel: str) -> str:
+        parts = Path(rel).parts
+        return "/".join(parts[1:]) if len(parts) > 1 else rel
+
+    # ── Struktur sammeln  Folder ▸ Datei ▸ Funktionen ────────────
+    folders: dict[str, dict[str, list[str]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for rel_path, meta in code_tree.items():
+        rel = trim(rel_path)
+        folder, file = rel.split("/", 1) if "/" in rel else ("<root>", rel)
+        folders[folder][file].extend(meta.get("functions", {}).keys())
+
+    uml = [
+        "@startuml",
+        "skinparam linetype ortho",
+        'skinparam defaultFontName "Courier New"',
+    ]
+
+    # ── Packages + Komponenten ───────────────────────────────────
+    for folder, files in sorted(folders.items()):
+        uml.append(f'package "{folder}" {{')
+        for file, fns in sorted(files.items()):
+            file_alias = esc(file)
+            uml.append(f'  package "{file}" as {file_alias} {{')
+            for fn in sorted(fns):
+                fn_alias = esc(f"{file}__{fn}")
+                uml.append(f'    component {fn_alias} as {fn}')
+            uml.append("  }")
+        uml.append("}")
+
+    # ── Abhängigkeitskanten (projekt­interne Imports) ────────────
+    for row in imports_rows:
+        src_alias = esc(trim(row["file"]))
+        if row["module"].startswith("app."):
+            dst = row["module"].replace(".", "/") + ".py"
+            dst_alias = esc(trim(dst))
+            uml.append(f"{src_alias} ..> {dst_alias} : import")
+
+    uml.append("@enduml")
+    return "\n".join(uml)
+
+# ──────────────────────────────────────────────────────────────────
+# 1) Start- und Projekt­auswahl
+# ──────────────────────────────────────────────────────────────────
+@bp.route("/")
 def index():
     settings = utils.read_settings()
-    if settings.get("token"):
-        return redirect(url_for('main.project'))
-    else:
-        return redirect(url_for('main.settings_page'))
+    return redirect(
+        url_for("main.project" if settings.get("token")
+                else "main.settings_page")
+    )
 
-@bp.route('/project', methods=['GET', 'POST'])
+@bp.route("/project", methods=["GET", "POST"])
 def project():
     settings = utils.read_settings()
-    token = settings.get("token", "")
-    if not token:
-        return redirect(url_for('main.settings_page'))
+    if not settings.get("token"):
+        return redirect(url_for("main.settings_page"))
+
     form = ProjectForm()
-    projects_dict = settings.get("projects", {})
-    form.project.choices = [(key, key) for key in sorted(projects_dict.keys())]
+    form.project.choices = [
+        (k, k) for k in sorted(settings.get("projects", {}))
+    ]
     if form.validate_on_submit():
         session["project"] = form.project.data
-        return redirect(url_for('main.select_files'))
+        return redirect(url_for("main.select_files"))
     return render_template("project.html", form=form)
 
-@bp.route('/select_files', methods=['GET'])
+# ──────────────────────────────────────────────────────────────────
+# 2) Dateiliste anzeigen
+# ──────────────────────────────────────────────────────────────────
+@bp.route("/select_files")
 def select_files():
-    settings = utils.read_settings()
-    token = settings.get("token", "")
-    project_key = session.get('project')
-    if not token or not project_key:
-        return redirect(url_for('main.project'))
-    repo_url = settings.get("projects", {}).get(project_key)
-    if not repo_url:
-        return redirect(url_for('main.project'))
-    
-    # Erhalte die Liste der Dateien (normalisierte Dateipfade)
-    file_list = utils.get_flat_file_list(repo_url, token)
-    flat_list = []
-    for f in file_list:
-        # Berechne den Einrückungslevel (Anzahl der "/" minus 1, da im ZIP meist ein Top-Level-Verzeichnis existiert)
-        indent = f.count('/') - 1  
-        flat_list.append({"filename": f, "indent": indent})
-    
-    return render_template('select_files.html', flat_list=flat_list, project=project_key)
-
-# Gesamtausgabe / Analyse
-@bp.route("/full_output", methods=["GET", "POST"])
-def full_output():
-    settings   = utils.read_settings()
-    token      = settings.get("token", "")
+    settings    = utils.read_settings()
+    token       = settings.get("token", "")
     project_key = session.get("project")
     if not token or not project_key:
         return redirect(url_for("main.project"))
 
-    repo_url = settings.get("projects", {}).get(project_key)
+    repo_url  = settings["projects"].get(project_key)
+    file_list = utils.get_flat_file_list(repo_url, token)
 
-    # ---------- Benutzer‑Optionen ----------------------------------
+    flat_list = [
+        {"filename": p, "indent": p.count("/") - 1}
+        for p in file_list
+    ]
+    return render_template("select_files.html",
+                           flat_list=flat_list, project=project_key)
+
+# ──────────────────────────────────────────────────────────────────
+# 3) Gesamtausgabe / Analyse / UML
+# ──────────────────────────────────────────────────────────────────
+@bp.route("/full_output", methods=["GET", "POST"])
+def full_output():
+    settings    = utils.read_settings()
+    token       = settings.get("token", "")
+    project_key = session.get("project")
+    if not token or not project_key:
+        return redirect(url_for("main.project"))
+
+    repo_url = settings["projects"].get(project_key)
+
+    # ── Benutzer-Optionen ─────────────────────────────────────────
     if request.method == "POST":
         selected_paths = request.form.getlist("selected_paths")
         analyse        = "with_analysis" in request.form
     else:
-        selected_paths = None        # alle Dateien
-        analyse        = False
+        selected_paths, analyse = None, False
 
-    # ---------- ZIP verarbeiten -----------------------------------
-    structure_str, content_str, analysis_rows, code_tree = utils.get_zip_full_output(
-        repo_url, token, selected_paths, analyse=analyse
+    # ── ZIP analysieren ───────────────────────────────────────────
+    structure_str, content_str, analysis_rows, code_tree = (
+        utils.get_zip_full_output(repo_url, token,
+                                  selected_paths, analyse=analyse)
     )
     if structure_str is None:
-        return render_template("full_output.html", error="Fehler beim Laden.")
+        return render_template("full_output.html",
+                               error="Fehler beim Laden.")
 
-    # ---------- Markdown‑Tabelle ----------------------------------
+    # ── Imports-Tabelle ───────────────────────────────────────────
+    imports_rows = [
+        {"file": rel, **imp}
+        for rel, info in code_tree.items()
+        for imp in info.get("imports", [])
+    ]
+    imports_rows.sort(key=lambda r: (r["file"], r["lineno"]))
+
+    imports_copy = (
+        "file\tlineno\ttype\tmodule\tname\talias\n" +
+        "\n".join(
+            "\t".join(str(r.get(c, "") or "") for c in
+                      ("file", "lineno", "type", "module", "name", "alias"))
+            for r in imports_rows
+        )
+    ) if imports_rows else ""
+
+    # ── Funktions-Markdown ────────────────────────────────────────
     if analysis_rows:
         known      = ["file", "func", "route", "class", "lineno"]
-        col_order  = [c for c in known if c in analysis_rows[0]] or list(analysis_rows[0])
-        md_lines   = [
-            "| " + " | ".join(col_order) + " |",
-            "| " + " | ".join(["---"] * len(col_order)) + " |",
-        ] + [
+        col_order  = [c for c in known if c in analysis_rows[0]] \
+                     or list(analysis_rows[0])
+
+        md_head = "| " + " | ".join(col_order) + " |"
+        md_sep  = "| " + " | ".join(["---"] * len(col_order)) + " |"
+        md_body = [
             "| " + " | ".join(str(r.get(c, "")) for c in col_order) + " |"
             for r in analysis_rows
         ]
-        analysis_markdown = "\n".join(md_lines)
+        analysis_markdown = "\n".join([md_head, md_sep, *md_body])
     else:
         col_order, analysis_markdown = [], ""
-        
-    # ---------- Code‑Baum (Ordner‑/Dateibaum) ----------------------
-    from collections import defaultdict
 
-    def build_dir_tree(flat: Dict) -> Dict:
-        """wandelt {'app/routes.py': info, …} in verschachtelten Dict‑Baum um"""
+    # ── Code-Baum (Text) ──────────────────────────────────────────
+    def build_tree(flat: Dict[str, dict]) -> Dict:
         root: Dict = {}
         for rel_path, info in flat.items():
-            parts = rel_path.split("/")
-            ptr   = root
+            parts, ptr = rel_path.split("/"), root
             for part in parts[:-1]:
-                ptr = ptr.setdefault(part, {})      # legt Unterdict an
-            ptr[parts[-1]] = info                   # Dateiknoten
+                ptr = ptr.setdefault(part, {})
+            ptr[parts[-1]] = info
         return root
 
-    def fmt_dir(node: Dict, prefix: str = "") -> list[str]:
-        lines, keys = [], sorted(node.keys())
-        for idx, name in enumerate(keys):
-            is_last  = idx == len(keys) - 1
-            branch   = "└── " if is_last else "├── "
-            new_pref = prefix + ("    " if is_last else "│   ")
+    def fmt_dir(node: Dict, pref: str = "") -> list[str]:
+        out, keys = [], sorted(node)
+        for i, name in enumerate(keys):
+            last   = i == len(keys) - 1
+            branch = "└── " if last else "├── "
+            next_p = pref + ("    " if last else "│   ")
 
-            # Ordner?
-            if isinstance(node[name], dict) and "functions" not in node[name]:
-                lines.append(prefix + branch + name + "/")
-                lines.extend(fmt_dir(node[name], new_pref))
-            else:  # Datei
-                lines.append(prefix + branch + name)
-                funcs = node[name].get("functions", {})
-                fn_keys = list(funcs)
-                for jdx, func in enumerate(fn_keys):
-                    is_last_fn = jdx == len(fn_keys) - 1
-                    fn_branch  = "└── " if is_last_fn else "├── "
-                    route      = funcs[func].get("route")
-                    route_txt  = f"  route: {route}" if route else ""
-                    lines.append(
-                        new_pref + fn_branch + f"{func}(){route_txt}"
-                    )
-        return lines
+            if isinstance(node[name], dict) and \
+               "functions" not in node[name]:
+                out += [pref + branch + name + "/",
+                        *fmt_dir(node[name], next_p)]
+            else:
+                out.append(pref + branch + name)
+                funcs = list(node[name].get("functions", {}))
+                for j, fn in enumerate(funcs):
+                    fn_last = j == len(funcs) - 1
+                    fn_br   = "└── " if fn_last else "├── "
+                    route   = node[name]["functions"][fn].get("route", "")
+                    out.append(next_p + fn_br + f"{fn}()" +
+                               (f"  route: {route}" if route else ""))
+        return out
 
-    dir_tree      = build_dir_tree(code_tree)
-    code_tree_str = "\n".join(fmt_dir(dir_tree))
+    code_tree_str = "\n".join(fmt_dir(build_tree(code_tree)))
 
+    # ── PlantUML-Script (Package/Component) ───────────────────────
+    uml_code = build_package_uml(code_tree, imports_rows)
 
-    # ---------- Kombinierte Textausgabe ----------------------------
+    # ── Kombinierte Ausgabe ───────────────────────────────────────
     combined_text = (
-        f"Struktur der ZIP-Datei:\n{structure_str}\n\n"
-        f"Einsicht in die Dateien:\n{content_str}"
+        "Struktur der ZIP-Datei:\n" + structure_str + "\n\n" +
+        "Einsicht in die Dateien:\n" + content_str
     )
 
-    # ---------- Render‑Template -----------------------------------
     return render_template(
         "full_output.html",
         combined_text     = combined_text,
         analysis_rows     = analysis_rows,
         analysis_markdown = analysis_markdown,
         col_order         = col_order,
+        imports_rows      = imports_rows,
+        imports_copy      = imports_copy,
         code_tree_str     = code_tree_str,
+        uml_code          = uml_code,
         analyse_flag      = analyse,
     )
 
-
-
-@bp.route('/settings', methods=['GET', 'POST'])
+# ──────────────────────────────────────────────────────────────────
+# 4) Einstellungen (Token / Projekte)
+# ──────────────────────────────────────────────────────────────────
+@bp.route("/settings", methods=["GET", "POST"])
 def settings_page():
     settings = utils.read_settings()
-    if request.method == 'POST':
+    if request.method == "POST":
         new_token = request.form.get("token", "").strip()
-        project_names = request.form.getlist("project_name[]")
-        project_urls = request.form.getlist("project_url[]")
-        projects = {}
-        for name, url in zip(project_names, project_urls):
-            if name.strip() != "" and url.strip() != "":
-                projects[name.strip()] = url.strip()
-        new_settings = {"token": new_token, "projects": projects}
-        utils.write_settings(new_settings)
-        session["token"] = new_token  # Token in der Session aktualisieren
+        names     = request.form.getlist("project_name[]")
+        urls      = request.form.getlist("project_url[]")
+
+        projects = {n.strip(): u.strip()
+                    for n, u in zip(names, urls) if n.strip() and u.strip()}
+
+        utils.write_settings({"token": new_token, "projects": projects})
+        session["token"] = new_token
         return redirect(url_for("main.project"))
-    return render_template("settings.html", token=settings.get("token", ""), projects=settings.get("projects", {}))
+
+    return render_template("settings.html",
+                           token=settings.get("token", ""),
+                           projects=settings.get("projects", {}))

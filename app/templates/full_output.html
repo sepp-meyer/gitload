@@ -5,7 +5,7 @@
 <h2>Ergebnisansicht</h2>
 
 <form method="post">
-  {# Re‑Submit Buttons #}
+  <!-- Re-Submit Buttons -->
   <input type="hidden" name="selected_paths" value="">
   <div class="form-check mb-2">
     <input class="form-check-input" type="checkbox"
@@ -22,11 +22,15 @@
 <ul class="nav nav-tabs" id="resultTab" role="tablist">
   <li class="nav-item">
     <a class="nav-link active" id="text-tab" data-toggle="tab"
-       href="#text" role="tab">Files als Text</a>
+       href="#text" role="tab">Files als Text</a>
   </li>
   <li class="nav-item">
     <a class="nav-link" id="func-tab" data-toggle="tab"
        href="#func" role="tab">Funktionsübersicht</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link" id="import-tab" data-toggle="tab"
+       href="#imports" role="tab">Imports</a>
   </li>
   <li class="nav-item">
     <a class="nav-link" id="tree-tab" data-toggle="tab"
@@ -38,7 +42,7 @@
   <!-- 1) Textansicht ---------------------------------------------- -->
   <div class="tab-pane fade show active" id="text" role="tabpanel">
     <div class="position-relative">
-      <button id="copyButton" class="btn btn-sm btn-info"
+      <button id="copyTextBtn" class="btn btn-sm btn-info"
               style="position:absolute; top:10px; right:10px;">
         Kopieren
       </button>
@@ -54,10 +58,10 @@
       <div class="position-relative">
         <button id="copyFuncBtn" class="btn btn-sm btn-info"
                 style="position:absolute; top:10px; right:10px;">
-          Tabelle kopieren
+          Kopieren
         </button>
 
-        <table class="table table-sm table-striped">
+        <table class="table table-sm table-striped" id="funcTable">
           <thead>
             <tr>{% for c in cols %}<th>{{ c|capitalize }}</th>{% endfor %}</tr>
           </thead>
@@ -68,20 +72,57 @@
           </tbody>
         </table>
 
-        <!-- verstecktes <textarea> mit der Markdown‑Version -->
+        <!-- verstecktes <textarea> mit der Markdown-Version -->
         <textarea id="funcCopyArea" style="position:absolute; left:-9999px;">
 {{ analysis_markdown }}
         </textarea>
       </div>
     {% else %}
-      <p class="text-muted">
-        Keine Analyse durchgeführt oder keine Funktionen gefunden.
-        Aktiviere die Checkbox oberhalb und klicke erneut auf „Ansicht neu erzeugen“.
-      </p>
+      <p class="text-muted">Keine Analyse durchgeführt oder keine Funktionen gefunden.</p>
     {% endif %}
   </div>
 
-  <!-- 3) Codebaum -------------------------------------------------- -->
+  <!-- 3) Import-Übersicht ----------------------------------------- -->
+  <div class="tab-pane fade" id="imports" role="tabpanel">
+    {% if imports_rows %}
+      <div class="position-relative">
+        <button id="copyImportBtn" class="btn btn-sm btn-info"
+                style="position:absolute; top:10px; right:10px;">
+          Kopieren
+        </button>
+
+        <table class="table table-sm table-striped" id="importTable">
+          <thead>
+            <tr>
+              <th>Datei</th><th>Zeile</th><th>Typ</th>
+              <th>Modul</th><th>Name</th><th>Alias</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for imp in imports_rows %}
+            <tr>
+              <td>{{ imp.file }}</td>
+              <td>{{ imp.lineno }}</td>
+              <td>{{ imp.type }}</td>
+              <td>{{ imp.module }}</td>
+              <td>{{ imp.name or "" }}</td>
+              <td>{{ imp.alias or "" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+
+        <!-- verdecktes <textarea> für TSV-Copy -->
+        <textarea id="importCopyArea" style="position:absolute; left:-9999px;">
+{{ imports_copy }}
+        </textarea>
+      </div>
+    {% else %}
+      <p class="text-muted">Keine Imports erkannt (oder Analyse nicht aktiviert).</p>
+    {% endif %}
+  </div>
+
+  <!-- 4) Codebaum -------------------------------------------------- -->
   <div class="tab-pane fade" id="tree" role="tabpanel">
     {% if code_tree_str %}
       <div class="position-relative">
@@ -97,42 +138,73 @@
   </div>
 </div>
 
-<!-- Bootstrap‑JS (nur wenn nicht schon im base.html enthalten) -->
+<!-- … Kopf, Tabs 1-4 identisch … -->
+<li class="nav-item">
+  <a class="nav-link" id="uml-tab" data-toggle="tab"
+     href="#uml" role="tab">UML</a>
+</li>
+<!-- … -->
+
+<!-- Tab-Content --------------------------------------------------- -->
+<!-- 5) UML-Ansicht ----------------------------------------------- -->
+<div class="tab-pane fade" id="uml" role="tabpanel">
+  {% if uml_code %}
+    <div class="position-relative">
+      <button id="copyUmlBtn" class="btn btn-sm btn-info"
+              style="position:absolute; top:10px; right:10px;">
+        Kopieren
+      </button>
+      <pre id="umlText" class="small">{{ uml_code }}</pre>
+    </div>
+  {% else %}
+    <p class="text-muted">Keine UML-Daten vorhanden.</p>
+  {% endif %}
+</div>
+<!-- … -->
+
+<!-- Bootstrap-JS -------------------------------------------------- -->
 <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
 <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
 
 <script>
-  // Copy‑Button (Text)
-  document.getElementById('copyButton').addEventListener('click', () => {
-      const ta = document.getElementById('outputText');
-      ta.select(); ta.setSelectionRange(0, 99999);
-      navigator.clipboard.writeText(ta.value);
-  });
-
-  // Copy‑Button (Funktionstabelle)
-  const copyFuncBtn = document.getElementById('copyFuncBtn');
-  if (copyFuncBtn){
-    copyFuncBtn.addEventListener('click', () => {
-      const ta = document.getElementById('funcCopyArea');
-      ta.select(); ta.setSelectionRange(0, 99999);
-      navigator.clipboard.writeText(ta.value.trim()).then(() => {
-          copyFuncBtn.textContent = "✔️ Kopiert!";
-          setTimeout(()=> copyFuncBtn.textContent = "Tabelle kopieren", 2000);
-      });
-    });
-  }
-
-  // Copy‑Button (Codebaum)
-  const copyTreeBtn = document.getElementById('copyTreeBtn');
-  if (copyTreeBtn){
-    copyTreeBtn.addEventListener('click', () => {
-      const txt = document.getElementById('treeText').innerText;
+  // Universal-Copy: helper
+  function copyFrom(idBtn, idSrc, transform=null){
+    const btn = document.getElementById(idBtn);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      let txt;
+      const el = document.getElementById(idSrc);
+      if (!el) return;
+      if (el.tagName === 'TEXTAREA' || el.tagName === 'PRE') {
+        txt = el.value || el.innerText;
+      } else {
+        txt = el.innerText;
+      }
+      if (transform) txt = transform(txt);
       navigator.clipboard.writeText(txt).then(() => {
-          copyTreeBtn.textContent = "✔️ Kopiert!";
-          setTimeout(()=> copyTreeBtn.textContent = "Kopieren", 2000);
+        btn.textContent = "✔️ Kopiert!";
+        setTimeout(() => btn.textContent = "Kopieren", 2000);
       });
     });
   }
+
+  // Text-Tab
+  copyFrom('copyTextBtn', 'outputText');
+
+  // Funktions-Tab (Markdown)
+  copyFrom('copyFuncBtn', 'funcCopyArea');
+
+  // Imports-Tab (TSV)
+  copyFrom('copyImportBtn', 'importCopyArea');
+
+  // Codebaum-Tab
+  copyFrom('copyTreeBtn', 'treeText');
+    
+  // Codebaum-Tab
+  copyFrom('copyUmlBtn', 'umlText');
+    
+    
+    
 </script>
 {% endblock %}
