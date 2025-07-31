@@ -5,6 +5,8 @@ import os
 import zipfile
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
+from collections import defaultdict
+
 
 import requests
 from requests.exceptions import RequestException
@@ -36,11 +38,12 @@ def get_zip_full_output(
     selected_paths: Optional[List[str]] = None,
     analyse: bool = False,
 ) -> Tuple[
-    str,                   # Struktur-String
-    str,                   # Inhalt-String
-    List[Dict],            # analysis_rows
-    Dict,                  # code_tree
-    List[Dict]             # alias_warnings
+    str,               # Struktur-String
+    str,               # Inhalt-String
+    List[Dict],        # analysis_rows
+    Dict,              # code_tree
+    List[Dict],        # alias_warnings
+    List[Dict],        # import_conflicts
 ]:
     headers = {"Authorization": f"token {token}"}
     try:
@@ -48,7 +51,7 @@ def get_zip_full_output(
         response.raise_for_status()
     except RequestException as exc:
         print(f"[gitload] Download-Fehler: {exc}")
-        return None, None, [], {}, []
+        return None, None, [], {}, [], []
 
     try:
         zip_file = zipfile.ZipFile(io.BytesIO(response.content))
@@ -119,22 +122,19 @@ def get_zip_full_output(
         alias_warnings: List[Dict] = []
 
         if analyse:
-            # 1) Standard-Analyse
+            # 1) Standard-Analyse und Alias-Erkennung
             for rel_path, text in _iterate_files_with_content(tree_focus):
                 suffix = Path(rel_path).suffix.lower()
                 analyzer = REGISTRY[suffix]
                 analysis_rows.extend(analyzer.analyse(rel_path, text))
                 if hasattr(analyzer, "analyse_tree"):
                     code_tree[rel_path] = analyzer.analyse_tree(rel_path, text)
-
-                # 2) Alias-Analyse, falls verfügbar
                 if hasattr(analyzer, "analyse_aliases"):
                     alias_warnings.extend(analyzer.analyse_aliases(rel_path, text))
 
             analysis_rows.sort(key=lambda r: (r["file"], r.get("lineno", 0)))
 
-            # 3) Funktions-Verknüpfungen (unchanged)...
-
+            # 2) Funktions-Verknüpfungen (unverändert)
             def _alias_map(meta: Dict) -> Dict[str, str]:
                 aliases = {}
                 for imp in meta.get("imports", []):
@@ -167,11 +167,39 @@ def get_zip_full_output(
                             continue
                         fn_meta.setdefault("out_calls", []).append((dst_rel, call))
 
-        return structure_str, content_str, analysis_rows, code_tree, alias_warnings
+        # ── Import-Konflikte erkennen
+        imports_rows: List[Dict] = []
+        for rel, info in code_tree.items():
+            for imp in info.get("imports", []):
+                row = {"file": rel, **imp}
+                imports_rows.append(row)
+
+        # Name → alle importierenden Module
+        name2modules: Dict[str, set] = defaultdict(set)
+        for imp in imports_rows:
+            name = imp.get("alias") or imp.get("name")
+            if not name:
+                continue
+            name2modules[name].add(imp.get("module", ""))
+
+        import_conflicts: List[Dict] = []
+        for imp in imports_rows:
+            name = imp.get("alias") or imp.get("name")
+            mods = name2modules.get(name, set())
+            if name and len(mods) > 1:
+                import_conflicts.append({
+                    "file":   imp["file"],
+                    "lineno": imp["lineno"],
+                    "name":   name,
+                    "modules": sorted(mods),
+                })
+
+        return structure_str, content_str, analysis_rows, code_tree, alias_warnings, import_conflicts
 
     except zipfile.BadZipFile:
         print("[gitload] ZIP-Datei fehlerhaft oder leer")
-        return None, None, [], {}, []
+        return None, None, [], {}, [], []
+
 
 
 

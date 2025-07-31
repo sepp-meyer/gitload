@@ -216,7 +216,7 @@ def full_output():
 
     # ZIP immer mit Analyse laden (alle Tabs befüllen)
     # ⇩ Neu: alias_warnings zusätzlich
-    structure_str, content_str, analysis_rows, code_tree, alias_warnings = (
+    structure_str, content_str, analysis_rows, code_tree, alias_warnings, import_conflicts = (
         utils.get_zip_full_output(repo_url, token,
                                   selected_paths, analyse=True)
     )
@@ -308,6 +308,7 @@ def full_output():
         code_tree_str     = code_tree_str,
         uml_code          = uml_code,
         alias_warnings    = alias_warnings,
+        import_conflicts = import_conflicts,
     )
 
 

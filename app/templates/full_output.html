@@ -155,6 +155,24 @@
     {% else %}
       <p class="text-muted">Keine Alias-Importe gefunden.</p>
     {% endif %}
+      
+      {% if import_conflicts %}
+        <hr>
+        <h5>Import-Pfad-Konflikte</h5>
+        <ul class="list-group">
+          {% for c in import_conflicts %}
+            <li class="list-group-item list-group-item-danger">
+              <strong>Datei:</strong> {{ c.file }}, <strong>Zeile:</strong> {{ c.lineno }}<br>
+              <code>{{ c.name }}</code> aus:
+              {% for mod in c.modules %}<code>{{ mod }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+              <br>
+              <small class="text-danger">
+                Gleiches Symbol „{{ c.name }}“ wird aus unterschiedlichen Pfaden importiert.
+              </small>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
   </div>
 </div>
 
