@@ -164,7 +164,8 @@ def select_files():
 # ════════════════════════════════════════════════════════════════════════
 # 3) Gesamtausgabe / Analyse / UML
 # ════════════════════════════════════════════════════════════════════════
-@bp.route("/full_output", methods=["GET", "POST"])
+
+@bp.route("/full_output", methods=["POST"])
 def full_output():
     settings    = utils.read_settings()
     token       = settings.get("token", "")
@@ -172,19 +173,15 @@ def full_output():
     if not token or not project_key:
         return redirect(url_for("main.project"))
 
+    # Ausgewählte Dateien aus dem vorherigen Formular
+    selected_paths = request.form.getlist("selected_paths")
+
     repo_url = settings["projects"].get(project_key)
 
-    # ── Benutzer-Optionen ──────────────────────────────────────────
-    if request.method == "POST":
-        selected_paths = request.form.getlist("selected_paths")
-        analyse        = "with_analysis" in request.form
-    else:
-        selected_paths, analyse = None, False
-
-    # ── ZIP analysieren ────────────────────────────────────────────
+    # ZIP immer mit Analyse laden (alle Tabs befüllen)
     structure_str, content_str, analysis_rows, code_tree = (
         utils.get_zip_full_output(repo_url, token,
-                                  selected_paths, analyse=analyse)
+                                  selected_paths, analyse=True)
     )
     if structure_str is None:
         return render_template("full_output.html",
@@ -197,22 +194,19 @@ def full_output():
         for imp in info.get("imports", [])
     ]
     imports_rows.sort(key=lambda r: (r["file"], r["lineno"]))
-
-    imports_copy = (
-        "file\tlineno\ttype\tmodule\tname\talias\n" +
-        "\n".join(
-            "\t".join(str(r.get(c, "") or "") for c in
-                      ("file", "lineno", "type", "module", "name", "alias"))
-            for r in imports_rows
-        )
-    ) if imports_rows else ""
+    imports_copy = ""
+    if imports_rows:
+        headers = ["file","lineno","type","module","name","alias"]
+        lines = ["\t".join(headers)]
+        for r in imports_rows:
+            lines.append("\t".join(str(r.get(c, "")) for c in headers))
+        imports_copy = "\n".join(lines)
 
     # ── Funktions-Markdown (Tabellen-Ansicht) ─────────────────────
     if analysis_rows:
-        known      = ["file", "func", "route", "class", "lineno"]
-        col_order  = [c for c in known if c in analysis_rows[0]] \
-                     or list(analysis_rows[0])
-
+        known     = ["file", "func", "route", "class", "lineno"]
+        col_order = [c for c in known if c in analysis_rows[0]] \
+                    or list(analysis_rows[0].keys())
         md_head = "| " + " | ".join(col_order) + " |"
         md_sep  = "| " + " | ".join(["---"] * len(col_order)) + " |"
         md_body = [
@@ -223,34 +217,35 @@ def full_output():
     else:
         col_order, analysis_markdown = [], ""
 
-    # ── Text-Baum (tree-like) ─────────────────────────────────────
-    def build_tree(flat: Dict[str, dict]) -> Dict:
-        root: Dict = {}
-        for rel_path, info in flat.items():
-            parts, ptr = rel_path.strip().split("/"), root
-            for part in parts[:-1]:
-                ptr = ptr.setdefault(part, {})
+    # ── Codebaum-String erzeugen ─────────────────────────────────
+    def build_tree(flat: dict) -> dict:
+        root = {}
+        for rel, info in flat.items():
+            parts = rel.strip().split("/")
+            ptr = root
+            for p in parts[:-1]:
+                ptr = ptr.setdefault(p, {})
             ptr[parts[-1]] = info
         return root
 
-    def fmt_dir(node: Dict, pref: str = "") -> List[str]:
-        out, keys = [], sorted(node)
+    def fmt_dir(node: dict, pref: str = "") -> list[str]:
+        out = []
+        keys = sorted(node)
         for i, name in enumerate(keys):
-            last   = i == len(keys) - 1
+            last = (i == len(keys) - 1)
             branch = "└── " if last else "├── "
-            next_p = pref + ("    " if last else "│   ")
-
-            if isinstance(node[name], dict) and "functions" not in node[name]:
-                out += [pref + branch + name + "/",
-                        *fmt_dir(node[name], next_p)]
+            next_pref = pref + ("    " if last else "│   ")
+            sub = node[name]
+            if isinstance(sub, dict) and "functions" not in sub:
+                out.append(f"{pref}{branch}{name}/")
+                out.extend(fmt_dir(sub, next_pref))
             else:
-                out.append(pref + branch + name)
-                for j, fn in enumerate(node[name].get("functions", {})):
-                    fn_last = j == len(node[name]["functions"]) - 1
-                    fn_br   = "└── " if fn_last else "├── "
-                    route   = node[name]["functions"][fn].get("route", "")
-                    out.append(next_p + fn_br + f"{fn}()" +
-                               (f"  route: {route}" if route else ""))
+                out.append(f"{pref}{branch}{name}")
+                for j, fn in enumerate(sub.get("functions", {})):
+                    fn_last = (j == len(sub["functions"]) - 1)
+                    fn_branch = "└── " if fn_last else "├── "
+                    route = sub["functions"][fn].get("route", "")
+                    out.append(f"{next_pref}{fn_branch}{fn}(){('  route: '+route) if route else ''}")
         return out
 
     code_tree_str = "\n".join(fmt_dir(build_tree(code_tree)))
@@ -258,7 +253,7 @@ def full_output():
     # ── UML-Script ────────────────────────────────────────────────
     uml_code = build_package_uml(code_tree)
 
-    # ── Antwort rendern ───────────────────────────────────────────
+    # ── Kombinierten Text (Struktur + Inhalte) ─────────────────────
     combined_text = (
         "Struktur der ZIP-Datei:\n" + structure_str + "\n\n" +
         "Einsicht in die Dateien:\n" + content_str
@@ -274,8 +269,8 @@ def full_output():
         imports_copy      = imports_copy,
         code_tree_str     = code_tree_str,
         uml_code          = uml_code,
-        analyse_flag      = analyse,
     )
+
 
 # ════════════════════════════════════════════════════════════════════════
 # 4) Einstellungen

@@ -4,20 +4,6 @@
 {% block content %}
 <h2>Ergebnisansicht</h2>
 
-<form method="post">
-  <!-- Re-Submit Buttons -->
-  <input type="hidden" name="selected_paths" value="">
-  <div class="form-check mb-2">
-    <input class="form-check-input" type="checkbox"
-           id="with_analysis" name="with_analysis"
-           {% if analyse_flag %}checked{% endif %}>
-    <label class="form-check-label" for="with_analysis">
-      Funktionsübersicht mit anzeigen
-    </label>
-  </div>
-  <button class="btn btn-sm btn-primary mb-3">Ansicht neu erzeugen</button>
-</form>
-
 <!-- Tabs ---------------------------------------------------------- -->
 <ul class="nav nav-tabs" id="resultTab" role="tablist">
   <li class="nav-item">
@@ -64,7 +50,6 @@
                 style="position:absolute; top:10px; right:10px;">
           Kopieren
         </button>
-
         <table class="table table-sm table-striped" id="funcTable">
           <thead>
             <tr>{% for c in cols %}<th>{{ c|capitalize }}</th>{% endfor %}</tr>
@@ -75,14 +60,10 @@
             {% endfor %}
           </tbody>
         </table>
-
-        <!-- verstecktes <textarea> mit der Markdown-Version -->
-        <textarea id="funcCopyArea" style="position:absolute; left:-9999px;">
-{{ analysis_markdown }}
-        </textarea>
+        <textarea id="funcCopyArea" style="position:absolute; left:-9999px;">{{ analysis_markdown }}</textarea>
       </div>
     {% else %}
-      <p class="text-muted">Keine Analyse durchgeführt oder keine Funktionen gefunden.</p>
+      <p class="text-muted">Keine Funktionen gefunden.</p>
     {% endif %}
   </div>
 
@@ -94,7 +75,6 @@
                 style="position:absolute; top:10px; right:10px;">
           Kopieren
         </button>
-
         <table class="table table-sm table-striped" id="importTable">
           <thead>
             <tr>
@@ -115,14 +95,10 @@
             {% endfor %}
           </tbody>
         </table>
-
-        <!-- verdecktes <textarea> für TSV-Copy -->
-        <textarea id="importCopyArea" style="position:absolute; left:-9999px;">
-{{ imports_copy }}
-        </textarea>
+        <textarea id="importCopyArea" style="position:absolute; left:-9999px;">{{ imports_copy }}</textarea>
       </div>
     {% else %}
-      <p class="text-muted">Keine Imports erkannt (oder Analyse nicht aktiviert).</p>
+      <p class="text-muted">Keine Imports gefunden.</p>
     {% endif %}
   </div>
 
@@ -137,11 +113,11 @@
         <pre id="treeText" class="small">{{ code_tree_str }}</pre>
       </div>
     {% else %}
-      <p class="text-muted">Keine Analyse durchgeführt.</p>
+      <p class="text-muted">Kein Codebaum verfügbar.</p>
     {% endif %}
   </div>
 
-  <!-- 5) UML-Ansicht ------------------------------------------- -->
+  <!-- 5) UML-Ansicht --------------------------------------------- -->
   <div class="tab-pane fade" id="uml" role="tabpanel">
     {% if uml_code %}
       <div class="position-relative">
@@ -163,40 +139,22 @@
 <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
 
 <script>
-  // Universal-Copy: helper
-  function copyFrom(idBtn, idSrc, transform=null){
+  function copyFrom(idBtn, idSrc) {
     const btn = document.getElementById(idBtn);
     if (!btn) return;
     btn.addEventListener('click', () => {
-      let txt;
       const el = document.getElementById(idSrc);
-      if (!el) return;
-      if (el.tagName === 'TEXTAREA' || el.tagName === 'PRE') {
-        txt = el.value || el.innerText;
-      } else {
-        txt = el.innerText;
-      }
-      if (transform) txt = transform(txt);
+      const txt = el.value || el.innerText;
       navigator.clipboard.writeText(txt).then(() => {
         btn.textContent = "✔️ Kopiert!";
         setTimeout(() => btn.textContent = "Kopieren", 2000);
       });
     });
   }
-
-  // Text-Tab
-  copyFrom('copyTextBtn', 'outputText');
-
-  // Funktions-Tab (Markdown)
-  copyFrom('copyFuncBtn', 'funcCopyArea');
-
-  // Imports-Tab (TSV)
+  copyFrom('copyTextBtn',   'outputText');
+  copyFrom('copyFuncBtn',   'funcCopyArea');
   copyFrom('copyImportBtn', 'importCopyArea');
-
-  // Codebaum-Tab
-  copyFrom('copyTreeBtn', 'treeText');
-  
-  // UML-Tab
-  copyFrom('copyUmlBtn', 'umlText');
+  copyFrom('copyTreeBtn',   'treeText');
+  copyFrom('copyUmlBtn',    'umlText');
 </script>
 {% endblock %}
