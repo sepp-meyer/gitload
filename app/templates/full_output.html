@@ -139,33 +139,60 @@
 
   <!-- 6) Fehlerquellen --------------------------------------------- -->
   <div class="tab-pane fade" id="errors" role="tabpanel">
-    {% if alias_warnings %}
-      <ul class="list-group">
-      {% for w in alias_warnings %}
-        <li class="list-group-item">
-          <strong>Datei:</strong> {{ w.file }}, 
-          <strong>Zeile:</strong> {{ w.lineno }}<br>
-          <code>from {{ w.module }} import {{ w.name }} as {{ w.alias }}</code><br>
-          <small class="text-warning">
-            Alias-Import `{{ w.alias }}` für `{{ w.name }}` kann UML-Generator verwirren. Am besten im Code auf Alias-import verzichten und Funktion direkt aufrufen.
-          </small>
-        </li>
-      {% endfor %}
-      </ul>
-    {% else %}
-      <p class="text-muted">Keine Alias-Importe gefunden.</p>
-    {% endif %}
-      
+    <div class="position-relative mb-2">
+      <button id="copyErrorsBtn" class="btn btn-sm btn-info"
+              style="position:absolute; top:0; right:0;">
+        Kopieren
+      </button>
+      <textarea id="errorsCopyArea" class="d-none">
+{% if alias_warnings %}
+Alias-Konflikte bei imports
+{% for w in alias_warnings %}
+Datei: {{ w.file }}, Zeile: {{ w.lineno }}
+from {{ w.module }} import {{ w.name }} as {{ w.alias }}
+Hinweis: Alias-Import `{{ w.alias }}` für `{{ w.name }}` kann UML-Generator verwirren.
+{% endfor %}
+{% else %}
+Keine Alias-Importe gefunden.
+{% endif %}
+
+{% if import_conflicts %}
+Import-Konflikte und Konventionen
+{% for c in import_conflicts %}
+Datei: {{ c.file }}, Zeile: {{ c.lineno }}
+{{ c.name }} aus: {% for mod in c.modules %}{{ mod }}{% if not loop.last %}, {% endif %}{% endfor %}
+Hinweis: Symbol „{{ c.name }}“ wird aus unterschiedlichen Pfaden importiert.
+{% endfor %}
+{% endif %}
+      </textarea>
+
+      {% if alias_warnings %}
+        <h5>Alias-Konflikte bei imports</h5>
+        <ul class="list-group">
+        {% for w in alias_warnings %}
+          <li class="list-group-item">
+            <strong>Datei:</strong> {{ w.file }}, 
+            <strong>Zeile:</strong> {{ w.lineno }}<br>
+            <code>from {{ w.module }} import {{ w.name }} as {{ w.alias }}</code><br>
+            <small class="text-warning">
+              Alias-Import `{{ w.alias }}` für `{{ w.name }}` kann UML-Generator verwirren. Am besten im Code auf Alias-import verzichten und Funktion direkt aufrufen.
+            </small>
+          </li>
+        {% endfor %}
+        </ul>
+      {% else %}
+        <p class="text-muted">Keine Alias-Importe gefunden.</p>
+      {% endif %}
+
       {% if import_conflicts %}
         <hr>
-        <h5>Import-Pfad-Konflikte</h5>
+        <h5>Import-Konflikte und Konventionen</h5>
         <ul class="list-group">
           {% for c in import_conflicts %}
             <li class="list-group-item list-group-item-danger">
               <strong>Datei:</strong> {{ c.file }}, <strong>Zeile:</strong> {{ c.lineno }}<br>
               <code>{{ c.name }}</code> aus:
-              {% for mod in c.modules %}<code>{{ mod }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
-              <br>
+              {% for mod in c.modules %}<code>{{ mod }}</code>{% if not loop.last %}, {% endif %}{% endfor %}<br>
               <small class="text-danger">
                 Gleiches Symbol „{{ c.name }}“ wird aus unterschiedlichen Pfaden importiert.
               </small>
@@ -173,6 +200,7 @@
           {% endfor %}
         </ul>
       {% endif %}
+    </div>
   </div>
 </div>
 
@@ -194,10 +222,12 @@
       });
     });
   }
+
   copyFrom('copyTextBtn',   'outputText');
   copyFrom('copyFuncBtn',   'funcCopyArea');
   copyFrom('copyImportBtn', 'importCopyArea');
   copyFrom('copyTreeBtn',   'treeText');
   copyFrom('copyUmlBtn',    'umlText');
+  copyFrom('copyErrorsBtn', 'errorsCopyArea');
 </script>
 {% endblock %}
