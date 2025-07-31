@@ -13,17 +13,16 @@ from app import utils
 
 bp = Blueprint("main", __name__)
 
-# ────────────────────────────────────────────────────────────────────────
-#  Plant-UML-Generator
-# ────────────────────────────────────────────────────────────────────────
-def build_package_uml(code_tree: Dict[str, dict],
-                      imports_rows: List[dict]) -> str:
-    """
-    Baut ein verschachteltes Package-Diagramm und
-    zeichnet alle internen Imports als Kanten.
-    """
+# ───────────────────────────────────────────────────────────────────────
+#  Plant-UML-Generator  (Files → verschachtelte Packages,
+#                        Functions → Komponenten,
+#                        Calls     → Funktions-Kanten)
+# ───────────────────────────────────────────────────────────────────────
+def build_package_uml(code_tree: Dict[str, dict]) -> str:
+    from pathlib import Path
+    from typing import Dict, List, Union
 
-    # --- Helper ---------------------------------------------------
+    # ---------- Helper -------------------------------------------------
     def esc(path: str) -> str:
         return path.replace(".", "_").replace("/", "__")
 
@@ -31,50 +30,32 @@ def build_package_uml(code_tree: Dict[str, dict],
         p = Path(rel).parts
         return "/".join(p[1:]) if len(p) > 1 else rel
 
-    def resolve_import(src_rel: str, module: str) -> str | None:
-        src_parts = Path(trim(src_rel)).with_suffix("").parts   # ('app', ...)
-        # absolute  app.foo.bar
-        if module.startswith("app."):
-            return module.replace(".", "/") + ".py"
-        # relative  .foo   ..bar
-        if module.startswith("."):
-            lvl = len(module) - len(module.lstrip("."))
-            tail = module.lstrip(".")
-            base = list(src_parts[:-1])
-            up = max(lvl - 1, 0)
-            if up > len(base):
-                return None
-            base = base[:len(base) - up]
-            if tail:
-                base += tail.split(".")
-            return "/".join(base) + ".py"
-        return None  # externes Modul
-
-    # --- 1) Ordner-/Dateibaum ------------------------------------
+    # ---------- 1) Baum der Ordner / Dateien / Funktionen --------------
     Tree = dict[str, "Tree | list[str]"]
     root: Tree = {}
     for rel, meta in code_tree.items():
         parts = Path(trim(rel)).parts
         ptr: Tree = root
-        for part in parts[:-1]:
-            ptr = ptr.setdefault(part, {})
+        for folder in parts[:-1]:
+            ptr = ptr.setdefault(folder, {})
         ptr[parts[-1]] = list(meta.get("functions", {}))
 
-    # --- 2) Packages & Komponenten ------------------------------
+    # ---------- 2) Komponenten rendern --------------------------------
     lines = [
         "@startuml",
-        "skinparam linetype ortho",
+        "left to right direction",
         'skinparam defaultFontName "Courier New"',
     ]
 
-    def render(name: str, node, path: str = "", ind: str = ""):
+    def render(name: str, node: Union["Tree", list[str]],
+               path: str = "", ind: str = "") -> None:
         alias = esc(path or name)
         lines.append(f'{ind}package "{name}" as {alias} {{')
         if isinstance(node, dict):
             for child, sub in sorted(node.items()):
                 new = f"{path}/{child}" if path else child
                 render(child, sub, new, ind + "  ")
-        else:
+        else:  # Funktions-Liste
             for fn in sorted(node):
                 fn_alias = esc(f"{path}__{fn}")
                 lines.append(f'{ind}  component "{fn}" as {fn_alias}')
@@ -83,21 +64,38 @@ def build_package_uml(code_tree: Dict[str, dict],
     for top, sub in sorted(root.items()):
         render(top, sub, top)
 
-    # --- 3) Import-Kanten ----------------------------------------
-    edges: set[tuple[str, str]] = set()
-    for row in imports_rows:
-        dst_rel = resolve_import(row["file"], row["module"])
-        if not dst_rel:
-            continue
-        src_alias = esc(trim(row["file"]))
-        dst_alias = esc(dst_rel)          #  <── FIX: kein trim()!
-        if (src_alias, dst_alias) in edges:
-            continue
-        edges.add((src_alias, dst_alias))
-        lines.append(f"{src_alias} ..> {dst_alias} : import")
+    # ---------- 3) Funktions-Lookup (Name → Alias) ---------------------
+    func2alias: Dict[str, str] = {}
+    file_of_alias: Dict[str, str] = {}
+    for rel, meta in code_tree.items():
+        file_alias = esc(trim(rel))
+        for fn in meta.get("functions", {}):
+            a = esc(f"{trim(rel)}__{fn}")
+            func2alias.setdefault(fn, a)           # bei Duplikaten gewinnt 1. Fund
+            file_of_alias[a] = file_alias
+
+    # ---------- 4) Call-Kanten erzeugen -------------------------------
+    added: set[tuple[str, str]] = set()
+    for rel, meta in code_tree.items():
+        src_file_alias = esc(trim(rel))
+        for fn, fn_meta in meta.get("functions", {}).items():
+            src_alias = esc(f"{trim(rel)}__{fn}")
+            for called in fn_meta.get("calls", []):
+                dst_alias = func2alias.get(called)          # nur, wenn darin definiert
+                if not dst_alias or dst_alias == src_alias:
+                    continue
+                # nur Datei-übergreifend
+                if file_of_alias.get(dst_alias) == src_file_alias:
+                    continue
+                edge = (src_alias, dst_alias)
+                if edge in added:
+                    continue
+                added.add(edge)
+                lines.append(f"{src_alias} ..> {dst_alias} : {called}()")
 
     lines.append("@enduml")
     return "\n".join(lines)
+
 
 # ════════════════════════════════════════════════════════════════════════
 # 1) Start- und Projekt­auswahl
@@ -241,7 +239,7 @@ def full_output():
     code_tree_str = "\n".join(fmt_dir(build_tree(code_tree)))
 
     # ── UML-Script ────────────────────────────────────────────────
-    uml_code = build_package_uml(code_tree, imports_rows)
+    uml_code = build_package_uml(code_tree)
 
     # ── Antwort rendern ───────────────────────────────────────────
     combined_text = (
