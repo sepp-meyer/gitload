@@ -372,56 +372,56 @@ def full_output():
             ptr[parts[-1]] = info
         return root
 
-def fmt_dir(node: dict, pref: str = "") -> list[str]:
-    """
-    Erzeugt einen ASCII-Baum der Dateien/Funktionen.
-    Mehrstufig verschachtelte Funktionen werden beliebig tief
-    eingerückt ausgegeben.
-    """
-    out: list[str] = []
-    keys = sorted(node)
+    def fmt_dir(node: dict, pref: str = "") -> list[str]:
+        """
+        Erzeugt einen ASCII-Baum der Dateien/Funktionen.
+        Mehrstufig verschachtelte Funktionen werden beliebig tief
+        eingerückt ausgegeben.
+        """
+        out: list[str] = []
+        keys = sorted(node)
 
-    for i, name in enumerate(keys):
-        last       = i == len(keys) - 1
-        branch     = "└── " if last else "├── "
-        next_pref  = pref + ("    " if last else "│   ")
-        sub        = node[name]
+        for i, name in enumerate(keys):
+            last       = i == len(keys) - 1
+            branch     = "└── " if last else "├── "
+            next_pref  = pref + ("    " if last else "│   ")
+            sub        = node[name]
 
-        # ───────── Ordner / Unterpakete ───────────────────────────
-        if isinstance(sub, dict) and "functions" not in sub:
-            out.append(f"{pref}{branch}{name}/")
-            out.extend(fmt_dir(sub, next_pref))
-            continue
+            # ───────── Ordner / Unterpakete ───────────────────────────
+            if isinstance(sub, dict) and "functions" not in sub:
+                out.append(f"{pref}{branch}{name}/")
+                out.extend(fmt_dir(sub, next_pref))
+                continue
 
-        # ───────── Datei ──────────────────────────────────────────
-        out.append(f"{pref}{branch}{name}")
+            # ───────── Datei ──────────────────────────────────────────
+            out.append(f"{pref}{branch}{name}")
 
-        # Hilfsfunktion für rekursive Ausgabe einer Funktion
-        def print_fn(fn_name: str,
-                     nested_map: dict[str, list[str]],
-                     prefix: str,
-                     is_last: bool) -> None:
-            route = sub["functions"][fn_name].get("route", "")
-            fn_branch = "└── " if is_last else "├── "
-            out.append(f"{prefix}{fn_branch}{fn_name}()"
-                       f"{('  route: '+route) if route else ''}")
+            # Hilfsfunktion für rekursive Ausgabe einer Funktion
+            def print_fn(fn_name: str,
+                         nested_map: dict[str, list[str]],
+                         prefix: str,
+                         is_last: bool) -> None:
+                route = sub["functions"][fn_name].get("route", "")
+                fn_branch = "└── " if is_last else "├── "
+                out.append(f"{prefix}{fn_branch}{fn_name}()"
+                           f"{('  route: '+route) if route else ''}")
 
-            kids = sorted(nested_map.get(fn_name, []))
-            if not kids:
-                return
+                kids = sorted(nested_map.get(fn_name, []))
+                if not kids:
+                    return
 
-            kid_pref_base = prefix + ("    " if is_last else "│   ")
-            for k, kid in enumerate(kids):
-                kid_last = k == len(kids) - 1
-                print_fn(kid, nested_map, kid_pref_base, kid_last)
+                kid_pref_base = prefix + ("    " if is_last else "│   ")
+                for k, kid in enumerate(kids):
+                    kid_last = k == len(kids) - 1
+                    print_fn(kid, nested_map, kid_pref_base, kid_last)
 
-        nested_map = sub.get("nested", {})
-        funcs = sorted(sub.get("functions", {}))
-        for j, fn in enumerate(funcs):
-            fn_last = j == len(funcs) - 1
-            print_fn(fn, nested_map, next_pref, fn_last)
+            nested_map = sub.get("nested", {})
+            funcs = sorted(sub.get("functions", {}))
+            for j, fn in enumerate(funcs):
+                fn_last = j == len(funcs) - 1
+                print_fn(fn, nested_map, next_pref, fn_last)
 
-    return out
+        return out
 
 
     code_tree_str = "\n".join(fmt_dir(build_tree(code_tree)))
