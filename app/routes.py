@@ -124,12 +124,24 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
     # ─────────────────────────────────────────────────────────────────
     func2alias: Dict[str, str] = {}
     file_of_alias: Dict[str, str] = {}
+
     for rel, meta in code_tree.items():
-        mod_alias = esc(trim(rel))
+        rel_trim = trim(rel)
+        mod_alias = esc(rel_trim)
+
+        # 4a) Top-Level-Funktionen
         for fn in meta.get("functions", {}):
-            alias = esc(f"{trim(rel)}__{fn}")
+            alias = esc(f"{rel_trim}__{fn}")
             func2alias[fn] = alias
             file_of_alias[alias] = mod_alias
+
+        # 4b) **NEU → Nested-Funktionen**
+        for parent, inners in meta.get("nested", {}).items():
+            for inner in inners:
+                alias = esc(f"{rel_trim}__{parent}__{inner}")   # 1
+                func2alias[inner] = alias                        # 2
+                file_of_alias[alias] = mod_alias                 # 3
+
 
     # ─────────────────────────────────────────────────────────────────
     # 5) Modul-Auflösung  (Import-Strings → Dateiname ohne Suffix)
