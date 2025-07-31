@@ -1,8 +1,10 @@
+# ────────────────────────────────────────────────────────────────────────
 # app/routes.py
+from __future__ import annotations
 from pathlib import Path
 from flask import (
     Blueprint, render_template, redirect, url_for,
-    session, request
+    session, request, flash
 )
 from typing import Dict, List, Union
 from collections import defaultdict
@@ -11,93 +13,95 @@ from app import utils
 
 bp = Blueprint("main", __name__)
 
-# ════════════════════════════════════════════════════════════════════
-#  Plant-UML-Generator  (Ordner • Dateien • Funktionen • Kanten)
-# ════════════════════════════════════════════════════════════════════
+# ────────────────────────────────────────────────────────────────────────
+#  Plant-UML-Generator
+# ────────────────────────────────────────────────────────────────────────
 def build_package_uml(code_tree: Dict[str, dict],
                       imports_rows: List[dict]) -> str:
     """
-    Erzeugt ein Package-Diagramm à la
-
-        app
-        └─ game_modules
-           ├─ card_loader.py
-           │  └─ load_cards_from_json
-           └─ card_stack.py
-              └─ play_card
+    Baut ein verschachteltes Package-Diagramm und
+    zeichnet alle internen Imports als Kanten.
     """
 
-    # ── Helpers ────────────────────────────────────────────────────
+    # --- Helper ---------------------------------------------------
     def esc(path: str) -> str:
-        """ID-Escape für PlantUML:  '.' → '_'   '/' → '__'."""
         return path.replace(".", "_").replace("/", "__")
 
     def trim(rel: str) -> str:
-        """Git-ZIP-Top-Folder abschneiden."""
         p = Path(rel).parts
         return "/".join(p[1:]) if len(p) > 1 else rel
 
-    # ── 1) Ordner/Datei-Baum aufbauen ──────────────────────────────
+    def resolve_import(src_rel: str, module: str) -> str | None:
+        src_parts = Path(trim(src_rel)).with_suffix("").parts   # ('app', ...)
+        # absolute  app.foo.bar
+        if module.startswith("app."):
+            return module.replace(".", "/") + ".py"
+        # relative  .foo   ..bar
+        if module.startswith("."):
+            lvl = len(module) - len(module.lstrip("."))
+            tail = module.lstrip(".")
+            base = list(src_parts[:-1])
+            up = max(lvl - 1, 0)
+            if up > len(base):
+                return None
+            base = base[:len(base) - up]
+            if tail:
+                base += tail.split(".")
+            return "/".join(base) + ".py"
+        return None  # externes Modul
+
+    # --- 1) Ordner-/Dateibaum ------------------------------------
     Tree = dict[str, "Tree | list[str]"]
     root: Tree = {}
-
-    for rel_path, meta in code_tree.items():
-        rel_parts = Path(trim(rel_path)).parts
+    for rel, meta in code_tree.items():
+        parts = Path(trim(rel)).parts
         ptr: Tree = root
-        for folder in rel_parts[:-1]:
-            ptr = ptr.setdefault(folder, {})
-        ptr[rel_parts[-1]] = list(meta.get("functions", {}).keys())
+        for part in parts[:-1]:
+            ptr = ptr.setdefault(part, {})
+        ptr[parts[-1]] = list(meta.get("functions", {}))
 
-    # ── 2) Rekursiv als Packages & Components rendern ──────────────
-    lines: List[str] = [
+    # --- 2) Packages & Komponenten ------------------------------
+    lines = [
         "@startuml",
         "skinparam linetype ortho",
         'skinparam defaultFontName "Courier New"',
     ]
 
-    def render(name: str, node: Union["Tree", list[str]],
-               path_so_far: str, indent: str = "") -> None:
-        alias = esc(path_so_far or name)
-        lines.append(f'{indent}package "{name}" as {alias} {{')
-
-        if isinstance(node, dict):                      # Ordner / Dateien
+    def render(name: str, node, path: str = "", ind: str = ""):
+        alias = esc(path or name)
+        lines.append(f'{ind}package "{name}" as {alias} {{')
+        if isinstance(node, dict):
             for child, sub in sorted(node.items()):
-                new_path = f"{path_so_far}/{child}" if path_so_far else child
-                render(child, sub, new_path, indent + "  ")
-        else:                                          # Funktionen
+                new = f"{path}/{child}" if path else child
+                render(child, sub, new, ind + "  ")
+        else:
             for fn in sorted(node):
-                fn_alias = esc(f"{path_so_far}__{fn}")
-                lines.append(f'{indent}  component "{fn}" as {fn_alias}')
-
-        lines.append(f"{indent}}}")
+                fn_alias = esc(f"{path}__{fn}")
+                lines.append(f'{ind}  component "{fn}" as {fn_alias}')
+        lines.append(f"{ind}}}")
 
     for top, sub in sorted(root.items()):
         render(top, sub, top)
 
-    # ── 3) Dateibezogene Import-Kanten (nur interne app.*) ─────────
+    # --- 3) Import-Kanten ----------------------------------------
+    edges: set[tuple[str, str]] = set()
     for row in imports_rows:
-        src_file_alias = esc(trim(row["file"]))
-        if row["module"].startswith("app."):
-            dst_rel = row["module"].replace(".", "/") + ".py"
-            dst_alias = esc(trim(dst_rel))
-            lines.append(f"{src_file_alias} ..> {dst_alias} : import")
-
-    # ── 4) Funktions-Call-Kanten (wenn utils.out_calls existiert) ──
-    for src_rel, meta in code_tree.items():
-        src_file_alias = esc(trim(src_rel))
-        for fn, info in meta.get("functions", {}).items():
-            src_fn_alias = esc(f"{trim(src_rel)}__{fn}")
-            for dst_rel, dst_fn in info.get("out_calls", []):
-                dst_fn_alias = esc(f"{trim(dst_rel)}__{dst_fn}")
-                lines.append(f"{src_fn_alias} ..> {dst_fn_alias} : call")
+        dst_rel = resolve_import(row["file"], row["module"])
+        if not dst_rel:
+            continue
+        src_alias = esc(trim(row["file"]))
+        dst_alias = esc(dst_rel)          #  <── FIX: kein trim()!
+        if (src_alias, dst_alias) in edges:
+            continue
+        edges.add((src_alias, dst_alias))
+        lines.append(f"{src_alias} ..> {dst_alias} : import")
 
     lines.append("@enduml")
     return "\n".join(lines)
 
-
-# ════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
 # 1) Start- und Projekt­auswahl
-# ════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
 @bp.route("/")
 def index():
     settings = utils.read_settings()
@@ -105,7 +109,6 @@ def index():
         url_for("main.project" if settings.get("token")
                 else "main.settings_page")
     )
-
 
 @bp.route("/project", methods=["GET", "POST"])
 def project():
@@ -122,10 +125,9 @@ def project():
         return redirect(url_for("main.select_files"))
     return render_template("project.html", form=form)
 
-
-# ════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
 # 2) Dateiliste anzeigen
-# ════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
 @bp.route("/select_files")
 def select_files():
     settings    = utils.read_settings()
@@ -144,10 +146,9 @@ def select_files():
     return render_template("select_files.html",
                            flat_list=flat_list, project=project_key)
 
-
-# ════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
 # 3) Gesamtausgabe / Analyse / UML
-# ════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
 @bp.route("/full_output", methods=["GET", "POST"])
 def full_output():
     settings    = utils.read_settings()
@@ -158,14 +159,14 @@ def full_output():
 
     repo_url = settings["projects"].get(project_key)
 
-    # ── Optionen aus dem Formular ----------------------------------
+    # ── Benutzer-Optionen ──────────────────────────────────────────
     if request.method == "POST":
         selected_paths = request.form.getlist("selected_paths")
         analyse        = "with_analysis" in request.form
     else:
         selected_paths, analyse = None, False
 
-    # ── ZIP analysieren --------------------------------------------
+    # ── ZIP analysieren ────────────────────────────────────────────
     structure_str, content_str, analysis_rows, code_tree = (
         utils.get_zip_full_output(repo_url, token,
                                   selected_paths, analyse=analyse)
@@ -174,7 +175,7 @@ def full_output():
         return render_template("full_output.html",
                                error="Fehler beim Laden.")
 
-    # ── Imports sammeln --------------------------------------------
+    # ── Imports sammeln ───────────────────────────────────────────
     imports_rows = [
         {"file": rel, **imp}
         for rel, info in code_tree.items()
@@ -191,10 +192,12 @@ def full_output():
         )
     ) if imports_rows else ""
 
-    # ── Funktions-Tabelle als Markdown ------------------------------
+    # ── Funktions-Markdown (Tabellen-Ansicht) ─────────────────────
     if analysis_rows:
         known      = ["file", "func", "route", "class", "lineno"]
-        col_order  = [c for c in known if c in analysis_rows[0]] or list(analysis_rows[0])
+        col_order  = [c for c in known if c in analysis_rows[0]] \
+                     or list(analysis_rows[0])
+
         md_head = "| " + " | ".join(col_order) + " |"
         md_sep  = "| " + " | ".join(["---"] * len(col_order)) + " |"
         md_body = [
@@ -205,7 +208,7 @@ def full_output():
     else:
         col_order, analysis_markdown = [], ""
 
-    # ── Baum als Text (tree-Optik) ----------------------------------
+    # ── Text-Baum (tree-like) ─────────────────────────────────────
     def build_tree(flat: Dict[str, dict]) -> Dict:
         root: Dict = {}
         for rel_path, info in flat.items():
@@ -237,10 +240,10 @@ def full_output():
 
     code_tree_str = "\n".join(fmt_dir(build_tree(code_tree)))
 
-    # ── UML generieren ----------------------------------------------
+    # ── UML-Script ────────────────────────────────────────────────
     uml_code = build_package_uml(code_tree, imports_rows)
 
-    # ── Rendern ------------------------------------------------------
+    # ── Antwort rendern ───────────────────────────────────────────
     combined_text = (
         "Struktur der ZIP-Datei:\n" + structure_str + "\n\n" +
         "Einsicht in die Dateien:\n" + content_str
@@ -259,10 +262,9 @@ def full_output():
         analyse_flag      = analyse,
     )
 
-
-# ════════════════════════════════════════════════════════════════════
-# 4) Einstellungen (Token & Projekte)
-# ════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
+# 4) Einstellungen
+# ════════════════════════════════════════════════════════════════════════
 @bp.route("/settings", methods=["GET", "POST"])
 def settings_page():
     settings = utils.read_settings()
@@ -278,6 +280,8 @@ def settings_page():
         session["token"] = new_token
         return redirect(url_for("main.project"))
 
-    return render_template("settings.html",
-                           token=settings.get("token", ""),
-                           projects=settings.get("projects", {}))
+    return render_template(
+        "settings.html",
+        token=settings.get("token", ""),
+        projects=settings.get("projects", {})
+    )
