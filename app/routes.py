@@ -31,6 +31,9 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
         wirft das ZIP-Root weg:
             'sepp-meyer-gitload-…/app/routes.py' → 'app/routes.py'
         """
+        def trim(rel: str) -> str: #fake
+            return hello #fake
+        
         parts = Path(rel).parts
         return "/".join(parts[1:]) if len(parts) > 1 else rel
 
