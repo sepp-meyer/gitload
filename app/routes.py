@@ -20,20 +20,17 @@ bp = Blueprint("main", __name__)
 #                        Calls     → Funktions-Kanten)
 # ───────────────────────────────────────────────────────────────────────
 def build_package_uml(code_tree: Dict[str, dict]) -> str:
+    import re
     from pathlib import Path
     from typing import Dict, List, Union
 
     # ---------- Helper -------------------------------------------------
     def esc(path: str) -> str:
-        """
-        Erzeugt einen PlantUML-kompatiblen Alias:
-          - alles, was nicht [A-Z a-z 0-9 _] ist, wird zu '_'
-        """
         return re.sub(r'[^A-Za-z0-9_]', '_', path)
 
     def trim(rel: str) -> str:
-        p = Path(rel).parts
-        return "/".join(p[1:]) if len(p) > 1 else rel
+        parts = Path(rel).parts
+        return "/".join(parts[1:]) if len(parts) > 1 else rel
 
     # ---------- 1) Baum der Ordner / Dateien / Funktionen --------------
     Tree = dict[str, "Tree | list[str]"]
@@ -46,37 +43,26 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
         ptr[parts[-1]] = list(meta.get("functions", {}))
 
     # ---------- 2) Komponenten rendern --------------------------------
-    lines = [
+    lines: List[str] = [
         "@startuml",
         "left to right direction",
         'skinparam defaultFontName "Courier New"',
     ]
-
-    def render(name: str, node: Union["Tree", list[str]],
-               path_so_far: str, indent: str = "") -> None:
-        """Rekursiver Package-Renderer."""
+    def render(name: str, node: Union["Tree", list[str]], path_so_far: str, indent: str = "") -> None:
         alias = esc(path_so_far or name)
         lines.append(f'{indent}package "{name}" as {alias} {{')
-
-        # ── (A) Unterordner / Dateien mit Funktionen ─────────────────
         if isinstance(node, dict):
             for child, sub in sorted(node.items()):
                 new_path = f"{path_so_far}/{child}" if path_so_far else child
                 render(child, sub, new_path, indent + "  ")
-
-        # ── (B) Datei hat mind. 1 erkannte Funktion ──────────────────
         elif node:
             for fn in sorted(node):
                 fn_alias = esc(f"{path_so_far}__{fn}")
                 lines.append(f'{indent}  component "{fn}" as {fn_alias}')
-
-        # ── (C) Datei-Typ unbekannt ⇒ Platzhalter-Component ──────────
         else:
-            placeholder_alias = esc(f"{path_so_far}__file")
-            lines.append(f'{indent}  component "{name}" as {placeholder_alias}')
-
+            placeholder = esc(f"{path_so_far}__file")
+            lines.append(f'{indent}  component "{name}" as {placeholder}')
         lines.append(f"{indent}}}")
-
 
     for top, sub in sorted(root.items()):
         render(top, sub, top)
@@ -87,22 +73,56 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
     for rel, meta in code_tree.items():
         file_alias = esc(trim(rel))
         for fn in meta.get("functions", {}):
-            a = esc(f"{trim(rel)}__{fn}")
-            func2alias.setdefault(fn, a)           # bei Duplikaten gewinnt 1. Fund
-            file_of_alias[a] = file_alias
+            alias = esc(f"{trim(rel)}__{fn}")
+            func2alias[fn] = alias
+            file_of_alias[alias] = file_alias
 
-    # ---------- 4) Call-Kanten erzeugen -------------------------------
+    # ---------- 4) Import-Namen sammeln -------------------------------
+    import_names = set()
+    for meta in code_tree.values():
+        for imp in meta.get("imports", []):
+            if imp["type"] == "import":
+                name = imp.get("alias") or imp["module"].split(".")[0]
+            else:  # from
+                name = imp.get("alias") or imp.get("name")
+            if name:
+                import_names.add(name)
+
+    # ---------- 5) Externe Funktionen erkennen & filtern -------------
+    all_calls = {
+        call
+        for meta in code_tree.values()
+        for fn_meta in meta.get("functions", {}).values()
+        for call in fn_meta.get("calls", [])
+    }
+    # nur solche, die nicht intern und in Importnamen vorkommen
+    external_fns = sorted(call for call in all_calls if call not in func2alias and call in import_names)
+
+    # Alias für jede externe Funktion anlegen
+    for fn in external_fns:
+        func2alias[fn] = esc(f"extern__{fn}")
+
+    # ---------- 6) Package für externe Funktionen ---------------------
+    if external_fns:
+        lines.append("")
+        lines.append('package "externe Funktionen" as externe {')
+        for fn in external_fns:
+            alias = func2alias[fn]
+            lines.append(f'  component "{fn}" as {alias}')
+        lines.append("}")
+        lines.append("")
+
+    # ---------- 7) Call-Kanten erzeugen ------------------------------
     added: set[tuple[str, str]] = set()
     for rel, meta in code_tree.items():
-        src_file_alias = esc(trim(rel))
         for fn, fn_meta in meta.get("functions", {}).items():
-            src_alias = esc(f"{trim(rel)}__{fn}")
+            src_alias = func2alias[fn]
             for called in fn_meta.get("calls", []):
-                dst_alias = func2alias.get(called)          # nur, wenn darin definiert
+                dst_alias = func2alias.get(called)
                 if not dst_alias or dst_alias == src_alias:
                     continue
-                # nur Datei-übergreifend
-                if file_of_alias.get(dst_alias) == src_file_alias:
+                # nur Datei-übergreifend oder extern
+                if file_of_alias.get(dst_alias) == esc(trim(rel)):
                     continue
                 edge = (src_alias, dst_alias)
                 if edge in added:
@@ -112,6 +132,9 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
 
     lines.append("@enduml")
     return "\n".join(lines)
+
+
+
 
 
 # ════════════════════════════════════════════════════════════════════════
