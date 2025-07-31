@@ -4,7 +4,7 @@ import json
 import os
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import requests
 from requests.exceptions import RequestException
@@ -28,28 +28,35 @@ def _iterate_files_with_content(tree: Dict, base: str = ""):
 # ════════════════════════════════════════════════════════════════════
 #  Haupt-Routine: ZIP laden → Struktur / Inhalt / Analyse
 # ════════════════════════════════════════════════════════════════════
+
+
 def get_zip_full_output(
     repo_url: str,
     token: str,
-    selected_paths: List[str] | None = None,
+    selected_paths: Optional[List[str]] = None,
     analyse: bool = False,
-) -> Tuple[str, str, List[Dict], Dict]:
-
+) -> Tuple[
+    str,                   # Struktur-String
+    str,                   # Inhalt-String
+    List[Dict],            # analysis_rows
+    Dict,                  # code_tree
+    List[Dict]             # alias_warnings
+]:
     headers = {"Authorization": f"token {token}"}
     try:
         response = requests.get(repo_url, headers=headers, timeout=15)
         response.raise_for_status()
     except RequestException as exc:
         print(f"[gitload] Download-Fehler: {exc}")
-        return None, None, [], {}
+        return None, None, [], {}, []
 
     try:
         zip_file = zipfile.ZipFile(io.BytesIO(response.content))
         full_tree: Dict = {}
         selected_tree: Dict = {}
-        filter_all = selected_paths is None  # True → „alle markiert“ (keine Filterliste übergeben)
+        filter_all = selected_paths is None  # True → „alle markiert“
 
-        # ── ZIP entpacken → verschachteltes Dict ‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐──
+        # ── ZIP entpacken → verschachteltes Dict
         for info in zip_file.infolist():
             if info.filename in ("", "/"):
                 continue
@@ -69,7 +76,7 @@ def get_zip_full_output(
                 content = f.read(50_000).decode("utf-8", errors="ignore")
             cur[parts[-1]] = content
 
-            # Auswahl-Baum für selektierte Dateien
+            # Auswahl-Baum
             norm = info.filename.rstrip("/")
             if filter_all or norm in (selected_paths or []):
                 cur = selected_tree
@@ -77,13 +84,12 @@ def get_zip_full_output(
                     cur = cur.setdefault(part, {})
                 cur[parts[-1]] = content
 
-        # Ab hier gilt: nur die selektierten Dateien (oder alle, falls keine Filterliste)
         tree_focus = selected_tree if not filter_all else full_tree
 
-        # ── Strings für Tabs 1 & 2 ‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐
-        def _fmt(tree, lvl=0):
+        # ── Strings für Tabs 1 & 2
+        def _fmt(tree: Dict, lvl=0) -> List[str]:
             ind = "  " * lvl
-            lines = []
+            lines: List[str] = []
             for k, v in tree.items():
                 if isinstance(v, dict):
                     lines.append(f"{ind}/{k}")
@@ -92,9 +98,9 @@ def get_zip_full_output(
                     lines.append(f"{ind}- {k}")
             return lines
 
-        def _fmt_content(tree, lvl=0):
+        def _fmt_content(tree: Dict, lvl=0) -> List[str]:
             ind = "  " * lvl
-            lines = []
+            lines: List[str] = []
             for k, v in tree.items():
                 if isinstance(v, dict):
                     lines.append(f"{ind}/{k}")
@@ -107,12 +113,13 @@ def get_zip_full_output(
         structure_str = "\n".join(_fmt(tree_focus))
         content_str   = "\n".join(_fmt_content(tree_focus))
 
-        # ── Analyse (Tabellen, Code-Baum) ‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐──
+        # ── Analyse (Tabellen, Code-Baum)
         analysis_rows: List[Dict] = []
         code_tree: Dict = {}
+        alias_warnings: List[Dict] = []
 
         if analyse:
-            # 1) Nur selektierte Dateien parsen
+            # 1) Standard-Analyse
             for rel_path, text in _iterate_files_with_content(tree_focus):
                 suffix = Path(rel_path).suffix.lower()
                 analyzer = REGISTRY[suffix]
@@ -120,29 +127,31 @@ def get_zip_full_output(
                 if hasattr(analyzer, "analyse_tree"):
                     code_tree[rel_path] = analyzer.analyse_tree(rel_path, text)
 
+                # 2) Alias-Analyse, falls verfügbar
+                if hasattr(analyzer, "analyse_aliases"):
+                    alias_warnings.extend(analyzer.analyse_aliases(rel_path, text))
+
             analysis_rows.sort(key=lambda r: (r["file"], r.get("lineno", 0)))
 
-            # 2) Alias-Map + Funktions-Verknüpfungen
+            # 3) Funktions-Verknüpfungen (unchanged)...
+
             def _alias_map(meta: Dict) -> Dict[str, str]:
                 aliases = {}
                 for imp in meta.get("imports", []):
                     if not imp.get("alias"):
                         continue
-                    # import pkg.mod as xyz  →  xyz → pkg.mod
                     if imp["type"] == "import":
                         aliases[imp["alias"]] = imp["module"]
-                    # from pkg.mod import foo as bar → bar → pkg.mod.foo
                     elif imp["type"] == "from":
-                        full = imp["module"].lstrip(".")  # relative → absolut?
-                        if imp["name"]:
-                            full += f".{imp['name']}"
-                        aliases[imp["alias"]] = full
+                        full_mod = imp["module"].lstrip(".")
+                        if imp.get("name"):
+                            full_mod += f".{imp['name']}"
+                        aliases[imp["alias"]] = full_mod
                 return aliases
 
-            def _mod_to_rel(mod: str) -> str | None:
+            def _mod_to_rel(mod: str) -> Optional[str]:
                 return "/".join(mod.split(".")) + ".py" if mod.startswith("app.") else None
 
-            # Zweiter Pass über alle selektierten Dateien
             for src_rel, meta in code_tree.items():
                 aliases = _alias_map(meta)
                 for fn_meta in meta.get("functions", {}).values():
@@ -158,11 +167,12 @@ def get_zip_full_output(
                             continue
                         fn_meta.setdefault("out_calls", []).append((dst_rel, call))
 
-        return structure_str, content_str, analysis_rows, code_tree
+        return structure_str, content_str, analysis_rows, code_tree, alias_warnings
 
     except zipfile.BadZipFile:
         print("[gitload] ZIP-Datei fehlerhaft oder leer")
-        return None, None, [], {}
+        return None, None, [], {}, []
+
 
 
 # ════════════════════════════════════════════════════════════════════

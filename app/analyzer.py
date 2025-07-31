@@ -93,6 +93,27 @@ class PythonAnalyzer(BaseAnalyzer):
             out["functions"][node.name] = meta
 
         return out
+    
+        # in app/analyzer.py, ergänze in PythonAnalyzer:
+        def analyse_aliases(self, rel_path: str, text: str) -> list[dict]:
+            """Findet alle `from … import … as …`-Statements mit Position."""
+            rows = []
+            try:
+                tree = ast.parse(text)
+            except SyntaxError:
+                return rows
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    for alias in node.names:
+                        if alias.asname:
+                            rows.append({
+                                "file": rel_path,
+                                "lineno": node.lineno,
+                                "module": (node.module or ""),
+                                "name": alias.name,
+                                "alias": alias.asname,
+                            })
+            return rows
 
     # -------------------------------- Hilfs-Methoden --------------
     def _extract_route(self, decorators):
@@ -160,6 +181,9 @@ class PythonAnalyzer(BaseAnalyzer):
                 return p.name
             p = getattr(p, "parent", None)
         return ""
+
+    
+
 
 
 # ───────── CSS-Analyzer (unverändert) ────────────────────────────

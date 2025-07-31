@@ -26,6 +26,11 @@
     <a class="nav-link" id="uml-tab" data-toggle="tab"
        href="#uml" role="tab">UML</a>
   </li>
+  <!-- Neuer Tab für Fehlerquellen -->
+  <li class="nav-item">
+    <a class="nav-link" id="errors-tab" data-toggle="tab"
+       href="#errors" role="tab">Fehlerquellen</a>
+  </li>
 </ul>
 
 <div class="tab-content border border-top-0 p-3" id="resultTabContent">
@@ -129,6 +134,26 @@
       </div>
     {% else %}
       <p class="text-muted">Keine UML-Daten vorhanden.</p>
+    {% endif %}
+  </div>
+
+  <!-- 6) Fehlerquellen --------------------------------------------- -->
+  <div class="tab-pane fade" id="errors" role="tabpanel">
+    {% if alias_warnings %}
+      <ul class="list-group">
+      {% for w in alias_warnings %}
+        <li class="list-group-item">
+          <strong>Datei:</strong> {{ w.file }}, 
+          <strong>Zeile:</strong> {{ w.lineno }}<br>
+          <code>from {{ w.module }} import {{ w.name }} as {{ w.alias }}</code><br>
+          <small class="text-warning">
+            Alias-Import `{{ w.alias }}` für `{{ w.name }}` kann UML-Generator verwirren.
+          </small>
+        </li>
+      {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-muted">Keine Alias-Importe gefunden.</p>
     {% endif %}
   </div>
 </div>

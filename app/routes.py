@@ -215,7 +215,8 @@ def full_output():
     repo_url = settings["projects"].get(project_key)
 
     # ZIP immer mit Analyse laden (alle Tabs befüllen)
-    structure_str, content_str, analysis_rows, code_tree = (
+    # ⇩ Neu: alias_warnings zusätzlich
+    structure_str, content_str, analysis_rows, code_tree, alias_warnings = (
         utils.get_zip_full_output(repo_url, token,
                                   selected_paths, analyse=True)
     )
@@ -295,6 +296,7 @@ def full_output():
         "Einsicht in die Dateien:\n" + content_str
     )
 
+    # ── Ergebnis rendern ───────────────────────────────────────────
     return render_template(
         "full_output.html",
         combined_text     = combined_text,
@@ -305,7 +307,9 @@ def full_output():
         imports_copy      = imports_copy,
         code_tree_str     = code_tree_str,
         uml_code          = uml_code,
+        alias_warnings    = alias_warnings,
     )
+
 
 
 # ════════════════════════════════════════════════════════════════════════
