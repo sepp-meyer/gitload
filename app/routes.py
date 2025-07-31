@@ -48,13 +48,14 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
         "left to right direction",
         'skinparam defaultFontName "Courier New"',
     ]
+
     def render(name: str, node: Union["Tree", list[str]], path_so_far: str, indent: str = "") -> None:
         alias = esc(path_so_far or name)
         lines.append(f'{indent}package "{name}" as {alias} {{')
         if isinstance(node, dict):
             for child, sub in sorted(node.items()):
-                new_path = f"{path_so_far}/{child}" if path_so_far else child
-                render(child, sub, new_path, indent + "  ")
+                new = f"{path_so_far}/{child}" if path_so_far else child
+                render(child, sub, new, indent + "  ")
         elif node:
             for fn in sorted(node):
                 fn_alias = esc(f"{path_so_far}__{fn}")
@@ -67,48 +68,59 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
     for top, sub in sorted(root.items()):
         render(top, sub, top)
 
-    # ---------- 3) Funktions-Lookup (Name → Alias) ---------------------
+    # ---------- 3) Internes Function→Alias-Mapping ---------------------
     func2alias: Dict[str, str] = {}
     file_of_alias: Dict[str, str] = {}
     for rel, meta in code_tree.items():
-        file_alias = esc(trim(rel))
+        mod_alias = esc(trim(rel))
         for fn in meta.get("functions", {}):
             alias = esc(f"{trim(rel)}__{fn}")
             func2alias[fn] = alias
-            file_of_alias[alias] = file_alias
+            file_of_alias[alias] = mod_alias
 
-    # ---------- 4) Import-Namen sammeln -------------------------------
-    import_names = set()
+    # ---------- 4) Import-Map (Name→Modul) ----------------------------
+    name2module: Dict[str, str] = {}
     for meta in code_tree.values():
         for imp in meta.get("imports", []):
-            if imp["type"] == "import":
-                name = imp.get("alias") or imp["module"].split(".")[0]
-            else:  # from
+            if imp["type"] == "from":
+                module = imp["module"].lstrip(".")
                 name = imp.get("alias") or imp.get("name")
-            if name:
-                import_names.add(name)
+                if name:
+                    name2module[name] = module
+            else:  # import
+                full = imp["module"]
+                asname = imp.get("alias") or full.split(".")[0]
+                name2module[asname] = full
 
-    # ---------- 5) Externe Funktionen erkennen & filtern -------------
+    # ---------- 5) Externe Funktionen erkennen/filtern ---------------
     all_calls = {
         call
         for meta in code_tree.values()
         for fn_meta in meta.get("functions", {}).values()
         for call in fn_meta.get("calls", [])
     }
-    # nur solche, die nicht intern und in Importnamen vorkommen
-    external_fns = sorted(call for call in all_calls if call not in func2alias and call in import_names)
+    external_fns = sorted(call for call in all_calls if call not in func2alias and call in name2module)
 
     # Alias für jede externe Funktion anlegen
     for fn in external_fns:
         func2alias[fn] = esc(f"extern__{fn}")
 
-    # ---------- 6) Package für externe Funktionen ---------------------
+    # ---------- 6) Package “externe Funktionen” mit Unterordnern ------
     if external_fns:
         lines.append("")
         lines.append('package "externe Funktionen" as externe {')
+        # group by module
+        modules: Dict[str, List[str]] = {}
         for fn in external_fns:
-            alias = func2alias[fn]
-            lines.append(f'  component "{fn}" as {alias}')
+            mod = name2module.get(fn, "")
+            modules.setdefault(mod, []).append(fn)
+        for mod, fns in sorted(modules.items()):
+            pkg_alias = esc(f"externale__{mod}")
+            lines.append(f'  package "{mod}.py" as {pkg_alias} {{')
+            for fn in sorted(fns):
+                alias = func2alias[fn]
+                lines.append(f'    component "{fn}" as {alias}')
+            lines.append("  }")
         lines.append("}")
         lines.append("")
 
@@ -116,22 +128,23 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
     added: set[tuple[str, str]] = set()
     for rel, meta in code_tree.items():
         for fn, fn_meta in meta.get("functions", {}).items():
-            src_alias = func2alias[fn]
+            src = func2alias[fn]
             for called in fn_meta.get("calls", []):
-                dst_alias = func2alias.get(called)
-                if not dst_alias or dst_alias == src_alias:
+                dst = func2alias.get(called)
+                if not dst or dst == src:
                     continue
-                # nur Datei-übergreifend oder extern
-                if file_of_alias.get(dst_alias) == esc(trim(rel)):
+                # überspringe intra-file-Kanten
+                if file_of_alias.get(dst) == file_of_alias.get(src):
                     continue
-                edge = (src_alias, dst_alias)
+                edge = (src, dst)
                 if edge in added:
                     continue
                 added.add(edge)
-                lines.append(f"{src_alias} ..> {dst_alias} : {called}()")
+                lines.append(f"{src} ..> {dst} : {called}()")
 
     lines.append("@enduml")
     return "\n".join(lines)
+
 
 
 
