@@ -2,10 +2,9 @@
 """
 Sammlung von Analyzer-Klassen.
 Jede Klasse liefert
-    1) eine flache Liste von Dicts  → Tabellenansicht
-    2) eine Baum-Struktur           → Codebaum-Ansicht
+    1) eine flache Tabelle  → Funktionsübersicht
+    2) eine Baum-Struktur   → Code-Baum für UML
 """
-
 from __future__ import annotations
 from pathlib import Path
 import ast
@@ -24,9 +23,26 @@ class BaseAnalyzer:
         return {}
 
 
-# ───────── Python ────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════
+#  Python-Analyzer
+# ═════════════════════════════════════════════════════════════════
 class PythonAnalyzer(BaseAnalyzer):
-    """Analysiert .py-Dateien (Funktionen, Routen, Funktions-Calls, Imports)"""
+    """
+    Analysiert .py-Dateien und liefert
+
+        {
+          "functions": {
+              "funcname": {
+                  "route": "...",
+                  "calls": [... nur Namen ...],
+                  "out_calls": []   # wird erst später gefüllt
+              },
+              ...
+          },
+          "imports": [...],
+          "aliases": { "alias": "voller.modul.pfad" }   # 🔄 neu
+        }
+    """
 
     # ------------------------------------------------ Tabelle ------
     def analyse(self, rel_path: str, text: str) -> List[Dict]:
@@ -49,12 +65,6 @@ class PythonAnalyzer(BaseAnalyzer):
 
     # ------------------------------------------------ Baum ---------
     def analyse_tree(self, rel_path: str, text: str) -> Dict:
-        """
-        Gibt ein Dict mit
-            - functions  → Routen + Aufrufe
-            - imports    → Liste aller Import-Statements
-        zurück.
-        """
         try:
             tree = ast.parse(text)
         except SyntaxError:
@@ -68,6 +78,7 @@ class PythonAnalyzer(BaseAnalyzer):
         out: Dict = {
             "functions": {},
             "imports":   self._collect_imports(tree),
+            "aliases":   self._collect_aliases(tree),   # 🔄
         }
 
         for node in ast.walk(tree):
@@ -77,14 +88,14 @@ class PythonAnalyzer(BaseAnalyzer):
             meta = {
                 "route": self._extract_route(node.decorator_list),
                 "calls": self._collect_calls(node),
+                "out_calls": [],                        # 🔄 Platzhalter
             }
             out["functions"][node.name] = meta
 
         return out
 
-    # --------------------------------------------- Hilfsmethoden --
+    # -------------------------------- Hilfs-Methoden --------------
     def _extract_route(self, decorators):
-        """Sucht @bp.route('/xyz')-Dekoratoren."""
         for dec in decorators:
             if isinstance(dec, ast.Call) and getattr(dec.func, "attr", "") == "route":
                 for arg in dec.args:
@@ -93,7 +104,6 @@ class PythonAnalyzer(BaseAnalyzer):
         return ""
 
     def _collect_calls(self, func_node):
-        """Sammelt alle Funktions-/Methoden-Aufrufe innerhalb einer Funktion."""
         called = set()
         for sub in ast.walk(func_node):
             if isinstance(sub, ast.Call):
@@ -105,10 +115,8 @@ class PythonAnalyzer(BaseAnalyzer):
         return sorted(called)
 
     def _collect_imports(self, tree: ast.AST) -> List[Dict]:
-        """Extrahiert alle Import-Anweisungen aus der Datei."""
         imps: List[Dict] = []
         for node in ast.walk(tree):
-            # import xyz as ab
             if isinstance(node, ast.Import):
                 for n in node.names:
                     imps.append({
@@ -118,7 +126,6 @@ class PythonAnalyzer(BaseAnalyzer):
                         "alias":  n.asname,
                         "lineno": node.lineno,
                     })
-            # from pkg.mod import foo as bar
             elif isinstance(node, ast.ImportFrom):
                 base_mod = "." * node.level + (node.module or "")
                 for n in node.names:
@@ -131,6 +138,21 @@ class PythonAnalyzer(BaseAnalyzer):
                     })
         return imps
 
+    def _collect_aliases(self, tree: ast.AST) -> Dict[str, str]:
+        """🔄 Alias-Tabelle auf Datei-Ebene (alias → voller.modul.pfad)."""
+        aliases: Dict[str, str] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for n in node.names:
+                    asname = n.asname or n.name.split(".")[0]
+                    aliases[asname] = n.name
+            elif isinstance(node, ast.ImportFrom):
+                base = "." * node.level + (node.module or "")
+                for n in node.names:
+                    asname = n.asname or n.name
+                    aliases[asname] = f"{base}.{n.name}".lstrip(".")
+        return aliases
+
     def _enclosing_class(self, node):
         p = getattr(node, "parent", None)
         while p:
@@ -140,7 +162,7 @@ class PythonAnalyzer(BaseAnalyzer):
         return ""
 
 
-# ───────── CSS  (Selektoren → Funktion) ──────────────────────────
+# ───────── CSS-Analyzer (unverändert) ────────────────────────────
 class CSSAnalyzer(BaseAnalyzer):
     _sel = re.compile(r"^\s*([^{]+?)\s*\{", re.MULTILINE)
 
@@ -149,12 +171,11 @@ class CSSAnalyzer(BaseAnalyzer):
             {"file": rel_path, "func": m.group(1).strip()}
             for m in self._sel.finditer(text)
         ]
-    # CSS-Dateien bekommen keinen Codebaum
 
 
-# ───────── Mapping / Registry ────────────────────────────────────
+# ───────── Registry ──────────────────────────────────────────────
 REGISTRY = defaultdict(BaseAnalyzer)
 REGISTRY.update({
     ".py": PythonAnalyzer(),
-    # ".css": CSSAnalyzer(),   # bei Bedarf aktivieren
+    # ".css": CSSAnalyzer(),
 })
