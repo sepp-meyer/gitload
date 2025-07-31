@@ -47,7 +47,7 @@ def get_zip_full_output(
         zip_file = zipfile.ZipFile(io.BytesIO(response.content))
         full_tree: Dict = {}
         selected_tree: Dict = {}
-        filter_all = selected_paths is None
+        filter_all = selected_paths is None  # True → „alle markiert“ (keine Filterliste übergeben)
 
         # ── ZIP entpacken → verschachteltes Dict ‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐──
         for info in zip_file.infolist():
@@ -69,13 +69,16 @@ def get_zip_full_output(
                 content = f.read(50_000).decode("utf-8", errors="ignore")
             cur[parts[-1]] = content
 
-            # Auswahl-Baum für Text-Preview
+            # Auswahl-Baum für selektierte Dateien
             norm = info.filename.rstrip("/")
             if filter_all or norm in (selected_paths or []):
                 cur = selected_tree
                 for part in parts[:-1]:
                     cur = cur.setdefault(part, {})
                 cur[parts[-1]] = content
+
+        # Ab hier gilt: nur die selektierten Dateien (oder alle, falls keine Filterliste)
+        tree_focus = selected_tree if not filter_all else full_tree
 
         # ── Strings für Tabs 1 & 2 ‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐
         def _fmt(tree, lvl=0):
@@ -101,16 +104,16 @@ def get_zip_full_output(
                     lines.append(f'{ind}  "{v}"')
             return lines
 
-        structure_str = "\n".join(_fmt(full_tree))
-        content_str   = "\n".join(_fmt_content(selected_tree))
+        structure_str = "\n".join(_fmt(tree_focus))
+        content_str   = "\n".join(_fmt_content(tree_focus))
 
         # ── Analyse (Tabellen, Code-Baum) ‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐‐──
         analysis_rows: List[Dict] = []
         code_tree: Dict = {}
 
         if analyse:
-            # 1) Dateien parsen
-            for rel_path, text in _iterate_files_with_content(full_tree):
+            # 1) Nur selektierte Dateien parsen
+            for rel_path, text in _iterate_files_with_content(tree_focus):
                 suffix = Path(rel_path).suffix.lower()
                 analyzer = REGISTRY[suffix]
                 analysis_rows.extend(analyzer.analyse(rel_path, text))
@@ -139,7 +142,7 @@ def get_zip_full_output(
             def _mod_to_rel(mod: str) -> str | None:
                 return "/".join(mod.split(".")) + ".py" if mod.startswith("app.") else None
 
-            # Zweiter Pass über alle Dateien
+            # Zweiter Pass über alle selektierten Dateien
             for src_rel, meta in code_tree.items():
                 aliases = _alias_map(meta)
                 for fn_meta in meta.get("functions", {}).values():
