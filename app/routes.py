@@ -19,6 +19,7 @@ bp = Blueprint("main", __name__)
 #                        Functions → Komponenten,
 #                        Calls     → Funktions-Kanten)
 # ───────────────────────────────────────────────────────────────────────
+# aktualisierte build_package_uml mit trim im resolve_module
 def build_package_uml(code_tree: Dict[str, dict]) -> str:
     import re
     from pathlib import Path
@@ -78,38 +79,64 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
             func2alias[fn] = alias
             file_of_alias[alias] = mod_alias
 
-    # ---------- 4) Import-Map (Name→Modul) ----------------------------
-    name2module: Dict[str, str] = {}
-    for meta in code_tree.values():
-        for imp in meta.get("imports", []):
-            if imp["type"] == "from":
-                module = imp["module"].lstrip(".")
-                name = imp.get("alias") or imp.get("name")
-                if name:
-                    name2module[name] = module
-            else:  # import
-                full = imp["module"]
-                asname = imp.get("alias") or full.split(".")[0]
-                name2module[asname] = full
+    # ---------- 4) Modul-Auflösung auf reinen Dateinamen -------------
+    def resolve_module(origin: str, raw: str) -> str:
+        from pathlib import Path
 
-    # ---------- 5) Externe Funktionen erkennen/filtern ---------------
+        # Ursprungspfad trimmen
+        rel_trimmed = trim(origin)
+        parts       = rel_trimmed.split('/')
+        base        = Path("/".join(parts[:-1]))
+
+        # Relative Ebene hochsteigen (level-1)
+        level = len(raw) - len(raw.lstrip('.'))
+        name  = raw.lstrip('.')
+        for _ in range(max(0, level - 1)):
+            base = base.parent
+
+        # Restmodul anhängen
+        if name:
+            for part in name.split('.'):
+                base = base / part
+
+        # Nur Dateinamen ohne .py-Suffix
+        fname = Path(base).name
+        return Path(fname).stem
+
+    # ---------- 5) Import-Map (Name→Dateiname) ------------------------
+    name2module: Dict[str, str] = {}
+    for origin, meta in code_tree.items():
+        for imp in meta.get("imports", []):
+            raw   = imp["module"]
+            canon = resolve_module(origin, raw)
+            if imp["type"] == "from":
+                n = imp.get("alias") or imp.get("name")
+                if n:
+                    name2module[n] = canon
+            else:
+                alias = imp.get("alias") or raw.split(".")[0]
+                name2module[alias] = canon
+
+    # ---------- 6) Externe Funktionen erkennen/filtern -------------
     all_calls = {
         call
         for meta in code_tree.values()
         for fn_meta in meta.get("functions", {}).values()
         for call in fn_meta.get("calls", [])
     }
-    external_fns = sorted(call for call in all_calls if call not in func2alias and call in name2module)
+    external_fns = sorted(
+        call for call in all_calls
+        if call not in func2alias and call in name2module
+    )
 
-    # Alias für jede externe Funktion anlegen
+    # Alias für externe Funktionen
     for fn in external_fns:
         func2alias[fn] = esc(f"extern__{fn}")
 
-    # ---------- 6) Package “externe Funktionen” mit Unterordnern ------
+    # ---------- 7) Package “externe Funktionen” zeichnen ------------
     if external_fns:
         lines.append("")
         lines.append('package "externe Funktionen" as externe {')
-        # group by module
         modules: Dict[str, List[str]] = {}
         for fn in external_fns:
             mod = name2module.get(fn, "")
@@ -124,7 +151,7 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
         lines.append("}")
         lines.append("")
 
-    # ---------- 7) Call-Kanten erzeugen ------------------------------
+    # ---------- 8) Call-Kanten erzeugen -----------------------------
     added: set[tuple[str, str]] = set()
     for rel, meta in code_tree.items():
         for fn, fn_meta in meta.get("functions", {}).items():
@@ -133,7 +160,6 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
                 dst = func2alias.get(called)
                 if not dst or dst == src:
                     continue
-                # überspringe intra-file-Kanten
                 if file_of_alias.get(dst) == file_of_alias.get(src):
                     continue
                 edge = (src, dst)
@@ -144,9 +170,6 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
 
     lines.append("@enduml")
     return "\n".join(lines)
-
-
-
 
 
 
