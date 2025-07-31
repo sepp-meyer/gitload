@@ -10,6 +10,7 @@ from typing import Dict, List, Union
 from collections import defaultdict
 from app.forms import ProjectForm
 from app import utils
+import re
 
 bp = Blueprint("main", __name__)
 
@@ -24,7 +25,11 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
 
     # ---------- Helper -------------------------------------------------
     def esc(path: str) -> str:
-        return path.replace(".", "_").replace("/", "__")
+        """
+        Erzeugt einen PlantUML-kompatiblen Alias:
+          - alles, was nicht [A-Z a-z 0-9 _] ist, wird zu '_'
+        """
+        return re.sub(r'[^A-Za-z0-9_]', '_', path)
 
     def trim(rel: str) -> str:
         p = Path(rel).parts
@@ -48,18 +53,30 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
     ]
 
     def render(name: str, node: Union["Tree", list[str]],
-               path: str = "", ind: str = "") -> None:
-        alias = esc(path or name)
-        lines.append(f'{ind}package "{name}" as {alias} {{')
+               path_so_far: str, indent: str = "") -> None:
+        """Rekursiver Package-Renderer."""
+        alias = esc(path_so_far or name)
+        lines.append(f'{indent}package "{name}" as {alias} {{')
+
+        # ── (A) Unterordner / Dateien mit Funktionen ─────────────────
         if isinstance(node, dict):
             for child, sub in sorted(node.items()):
-                new = f"{path}/{child}" if path else child
-                render(child, sub, new, ind + "  ")
-        else:  # Funktions-Liste
+                new_path = f"{path_so_far}/{child}" if path_so_far else child
+                render(child, sub, new_path, indent + "  ")
+
+        # ── (B) Datei hat mind. 1 erkannte Funktion ──────────────────
+        elif node:
             for fn in sorted(node):
-                fn_alias = esc(f"{path}__{fn}")
-                lines.append(f'{ind}  component "{fn}" as {fn_alias}')
-        lines.append(f"{ind}}}")
+                fn_alias = esc(f"{path_so_far}__{fn}")
+                lines.append(f'{indent}  component "{fn}" as {fn_alias}')
+
+        # ── (C) Datei-Typ unbekannt ⇒ Platzhalter-Component ──────────
+        else:
+            placeholder_alias = esc(f"{path_so_far}__file")
+            lines.append(f'{indent}  component "{name}" as {placeholder_alias}')
+
+        lines.append(f"{indent}}}")
+
 
     for top, sub in sorted(root.items()):
         render(top, sub, top)
