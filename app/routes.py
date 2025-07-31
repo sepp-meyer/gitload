@@ -12,16 +12,30 @@ from app import utils
 bp = Blueprint("main", __name__)
 
 # ──────────────────────────────────────────────────────────────────
-# Hilfs-Funktion: PlantUML-Script im Package/Component-Stil
+# Hilfs-Funktion: PlantUML-Script (Ordner ▸ Datei ▸ Funktion)
+#  - Dateien werden als „Packages“ angezeigt
+#  - Funktions-Komponenten tragen NUR den Funktions-Namen
 # ──────────────────────────────────────────────────────────────────
 def build_package_uml(code_tree: Dict[str, dict],
                       imports_rows: List[dict]) -> str:
-    """Erzeugt ein übersichtliches UML-Diagramm wie im Quick-Test-Beispiel."""
+    """
+    Erzeugt ein übersichtliches Diagramm:
+
+        app
+        ├─ routes.py
+        │  ├─ index
+        │  └─ save_data
+        └─ utils.py
+           ├─ read_settings
+           └─ format_date
+    """
 
     def esc(txt: str) -> str:
+        """Alias-ID:  .  → _,   / → __   (PlantUML-kompatibel)."""
         return txt.replace(".", "_").replace("/", "__")
 
     def trim(rel: str) -> str:
+        """Hash-Top-Folder (z. B. Git-ZIP-Ordner) entfernen."""
         parts = Path(rel).parts
         return "/".join(parts[1:]) if len(parts) > 1 else rel
 
@@ -30,7 +44,7 @@ def build_package_uml(code_tree: Dict[str, dict],
         lambda: defaultdict(list)
     )
     for rel_path, meta in code_tree.items():
-        rel = trim(rel_path)
+        rel      = trim(rel_path)
         folder, file = rel.split("/", 1) if "/" in rel else ("<root>", rel)
         folders[folder][file].extend(meta.get("functions", {}).keys())
 
@@ -47,12 +61,12 @@ def build_package_uml(code_tree: Dict[str, dict],
             file_alias = esc(file)
             uml.append(f'  package "{file}" as {file_alias} {{')
             for fn in sorted(fns):
-                fn_alias = esc(f"{file}__{fn}")
-                uml.append(f'    component {fn_alias} as {fn}')
+                fn_alias = esc(f"{file}__{fn}")  # Alias enthält Datei + Fn
+                uml.append(f'    component "{fn}" as {fn_alias}')
             uml.append("  }")
         uml.append("}")
 
-    # ── Abhängigkeitskanten (projekt­interne Imports) ────────────
+    # ── Abhängigkeits-Kanten (projekt­interne Imports) ────────────
     for row in imports_rows:
         src_alias = esc(trim(row["file"]))
         if row["module"].startswith("app."):
@@ -206,7 +220,7 @@ def full_output():
 
     code_tree_str = "\n".join(fmt_dir(build_tree(code_tree)))
 
-    # ── PlantUML-Script (Package/Component) ───────────────────────
+    # ── PlantUML-Script (angepasst) ───────────────────────────────
     uml_code = build_package_uml(code_tree, imports_rows)
 
     # ── Kombinierte Ausgabe ───────────────────────────────────────
