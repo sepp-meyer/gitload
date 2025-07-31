@@ -21,56 +21,91 @@ bp = Blueprint("main", __name__)
 # ───────────────────────────────────────────────────────────────────────
 # aktualisierte build_package_uml mit trim im resolve_module
 def build_package_uml(code_tree: Dict[str, dict]) -> str:
-    import re
-    from pathlib import Path
-    from typing import Dict, List, Union
-
-    def esc(path: str) -> str:
-        return re.sub(r'[^A-Za-z0-9_]', '_', path)
+    # ── Hilfsfunktionen ──────────────────────────────────────────────
+    def esc(s: str) -> str:
+        """ersetzt alle Nicht-Word-Zeichen → valider UML-Alias"""
+        return re.sub(r"[^A-Za-z0-9_]", "_", s)
 
     def trim(rel: str) -> str:
+        """
+        wirft das ZIP-Root weg:
+            'sepp-meyer-gitload-…/app/routes.py' → 'app/routes.py'
+        """
         parts = Path(rel).parts
         return "/".join(parts[1:]) if len(parts) > 1 else rel
 
-    # 1) Baum der Dateien/Ordner
-    Tree = dict[str, "Tree | list[str]"]
+    # ─────────────────────────────────────────────────────────────────
+    # 0) Nested-Kinder global sammeln (damit wir sie im Baum ausblenden,
+    #    aber weiterhin Calls/Kanten erzeugen können)
+    # ─────────────────────────────────────────────────────────────────
+    nested_children: set[str] = {
+        inner
+        for meta in code_tree.values()
+        for inners in meta.get("nested", {}).values()
+        for inner in inners
+    }
+
+    # ─────────────────────────────────────────────────────────────────
+    # 1) Baum der Ordner / Dateien / Top-Level-Funktionen aufbauen
+    # ─────────────────────────────────────────────────────────────────
+    Tree = dict[str, "Tree | list[str]"]      # rekursiver Typ
     root: Tree = {}
+
     for rel, meta in code_tree.items():
         parts = Path(trim(rel)).parts
         ptr: Tree = root
         for folder in parts[:-1]:
             ptr = ptr.setdefault(folder, {})
-        ptr[parts[-1]] = list(meta.get("functions", {}))
+        # nur Top-Level-Funktionen (nested-Kinder werden später als
+        # Unter-Komponenten gerendert)
+        top_funcs = [
+            fn for fn in meta.get("functions", {})
+            if fn not in nested_children
+        ]
+        ptr[parts[-1]] = top_funcs
 
-    # 2) Rendern
+    # ─────────────────────────────────────────────────────────────────
+    # 2) UML-Text vorbereiten
+    # ─────────────────────────────────────────────────────────────────
     lines: List[str] = [
         "@startuml",
         "left to right direction",
         'skinparam defaultFontName "Courier New"',
     ]
 
-    def render(name: str, node: Union["Tree", list[str]], path_so_far: str, indent: str = ""):
+    # ✱ Lookup-Tabelle für schnellen Zugriff auf Nested-Infos
+    trim2meta: Dict[str, Dict] = {trim(rel): meta for rel, meta in code_tree.items()}
+
+    # ─────────────────────────────────────────────────────────────────
+    # 3) Rekursives Rendern
+    # ─────────────────────────────────────────────────────────────────
+    def render(name: str,
+               node: Union["Tree", list[str]],
+               path_so_far: str,
+               indent: str = "") -> None:
+
         alias = esc(path_so_far or name)
         lines.append(f'{indent}package "{name}" as {alias} {{')
 
         if isinstance(node, dict):
-            # Unterpakete
+            # ── Unterordner / Dateien ───────────────────────────────
             for child, sub in sorted(node.items()):
-                new = f"{path_so_far}/{child}" if path_so_far else child
-                render(child, sub, new, indent + "  ")
+                new_path = f"{path_so_far}/{child}" if path_so_far else child
+                render(child, sub, new_path, indent + "  ")
 
-        elif node:
-            # Funktionen + Nested
-            nested = code_tree.get(path_so_far + ".py", {}).get("nested", {})
+        elif node:   # Liste der Top-Level-Funktionen der Datei
+            nested_map = trim2meta.get(path_so_far, {}).get("nested", {})
             for fn in sorted(node):
-                if nested.get(fn):
+                if nested_map.get(fn):
+                    # Parent-Funktion als eigenes Package
                     pkg_alias = esc(f"{path_so_far}__{fn}")
                     lines.append(f'{indent}  package "{fn}()" as {pkg_alias} {{')
-                    for inner in sorted(nested[fn]):
+                    for inner in sorted(nested_map[fn]):
                         inner_alias = esc(f"{path_so_far}__{fn}__{inner}")
                         lines.append(f'{indent}    component "{inner}()" as {inner_alias}')
                     lines.append(f'{indent}  }}')
                 else:
+                    # einfache Komponente
                     fn_alias = esc(f"{path_so_far}__{fn}")
                     lines.append(f'{indent}  component "{fn}()" as {fn_alias}')
 
@@ -84,7 +119,9 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
     for top, sub in sorted(root.items()):
         render(top, sub, top)
 
-    # 3) Alias-Map intern
+    # ─────────────────────────────────────────────────────────────────
+    # 4) Alias-Map für alle (!) Funktionen des Projekts
+    # ─────────────────────────────────────────────────────────────────
     func2alias: Dict[str, str] = {}
     file_of_alias: Dict[str, str] = {}
     for rel, meta in code_tree.items():
@@ -94,67 +131,71 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
             func2alias[fn] = alias
             file_of_alias[alias] = mod_alias
 
-    # 4) Modul-Auflösung auf Dateinamen
+    # ─────────────────────────────────────────────────────────────────
+    # 5) Modul-Auflösung  (Import-Strings → Dateiname ohne Suffix)
+    # ─────────────────────────────────────────────────────────────────
     def resolve_module(origin: str, raw: str) -> str:
         rel_trimmed = trim(origin)
-        parts       = rel_trimmed.split('/')
-        base        = Path("/".join(parts[:-1]))
-        level = len(raw) - len(raw.lstrip('.'))
-        name  = raw.lstrip('.')
+        base = Path("/".join(rel_trimmed.split("/")[:-1]))  # Ordner d. Quelle
+        level = len(raw) - len(raw.lstrip("."))
+        name  = raw.lstrip(".")
         for _ in range(max(0, level - 1)):
             base = base.parent
         if name:
-            for part in name.split('.'):
+            for part in name.split("."):
                 base = base / part
-        return Path(base).stem
+        return base.stem
 
-    # 5) Import-Map Name→Dateiname
     name2module: Dict[str, str] = {}
     for origin, meta in code_tree.items():
         for imp in meta.get("imports", []):
-            raw   = imp["module"]
-            canon = resolve_module(origin, raw)
+            canon = resolve_module(origin, imp["module"])
             if imp["type"] == "from":
                 n = imp.get("alias") or imp.get("name")
                 if n:
                     name2module[n] = canon
             else:
-                alias = imp.get("alias") or raw.split(".")[0]
+                alias = imp.get("alias") or imp["module"].split(".")[0]
                 name2module[alias] = canon
 
-    # 6) Externe Funktionen
+    # ─────────────────────────────────────────────────────────────────
+    # 6) Externe Funktionen sammeln
+    # ─────────────────────────────────────────────────────────────────
     all_calls = {
-        call
+        c
         for meta in code_tree.values()
         for fn_meta in meta.get("functions", {}).values()
-        for call in fn_meta.get("calls", [])
+        for c in fn_meta.get("calls", [])
     }
     external_fns = sorted(
-        call for call in all_calls
-        if call not in func2alias and call in name2module
+        c for c in all_calls
+        if c not in func2alias and c in name2module
     )
     for fn in external_fns:
         func2alias[fn] = esc(f"extern__{fn}")
 
-    # 7) Package “externe Funktionen”
+    # ─────────────────────────────────────────────────────────────────
+    # 7) „externe Funktionen“-Package
+    # ─────────────────────────────────────────────────────────────────
     if external_fns:
         lines.append("")
         lines.append('package "externe Funktionen" as externe {')
-        modules: Dict[str, List[str]] = {}
+        modules: Dict[str, List[str]] = defaultdict(list)
         for fn in external_fns:
-            mod = name2module.get(fn, "")
-            modules.setdefault(mod, []).append(fn)
+            modules[name2module[fn]].append(fn)
+
         for mod, fns in sorted(modules.items()):
             pkg_alias = esc(f"externale__{mod}")
             lines.append(f'  package "{mod}.py" as {pkg_alias} {{')
             for fn in sorted(fns):
-                alias = func2alias[fn]
-                lines.append(f'    component "{fn}" as {alias}')
+                lines.append(f'    component "{fn}" as {func2alias[fn]}')
             lines.append("  }")
         lines.append("}")
         lines.append("")
 
-    # 8) Call-Kanten
+    # ─────────────────────────────────────────────────────────────────
+    # 8) Funktions-Kanten erzeugen
+    # ─────────────────────────────────────────────────────────────────
     added: set[tuple[str, str]] = set()
     for rel, meta in code_tree.items():
         for fn, fn_meta in meta.get("functions", {}).items():
@@ -163,16 +204,17 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
                 dst = func2alias.get(called)
                 if not dst or dst == src:
                     continue
+                # keine Kanten innerhalb derselben Datei
                 if file_of_alias.get(dst) == file_of_alias.get(src):
                     continue
-                edge = (src, dst)
-                if edge in added:
+                if (src, dst) in added:
                     continue
-                added.add(edge)
+                added.add((src, dst))
                 lines.append(f"{src} ..> {dst} : {called}()")
 
     lines.append("@enduml")
     return "\n".join(lines)
+
 
 
 
@@ -292,24 +334,54 @@ def full_output():
         return root
 
     def fmt_dir(node: dict, pref: str = "") -> list[str]:
-        out = []
+        """
+        Erzeugt einen ASCII-Baum der Dateien/Funktionen.
+        Nested-Funktionen werden eingerückt unter ihrer Eltern-Funktion
+        dargestellt.
+
+        node : Teilbaum aus code_tree
+        pref : bereits vorhandener Einrück-Prefix (│/└──/├──)
+        """
+        out: list[str] = []
         keys = sorted(node)
+
         for i, name in enumerate(keys):
-            last = (i == len(keys) - 1)
-            branch = "└── " if last else "├── "
-            next_pref = pref + ("    " if last else "│   ")
-            sub = node[name]
+            last       = i == len(keys) - 1
+            branch     = "└── " if last else "├── "
+            next_pref  = pref + ("    " if last else "│   ")
+            sub        = node[name]
+
+            # ───────── Ordner / Unterpakete ───────────────────────────
             if isinstance(sub, dict) and "functions" not in sub:
                 out.append(f"{pref}{branch}{name}/")
                 out.extend(fmt_dir(sub, next_pref))
-            else:
-                out.append(f"{pref}{branch}{name}")
-                for j, fn in enumerate(sub.get("functions", {})):
-                    fn_last = (j == len(sub["functions"]) - 1)
-                    fn_branch = "└── " if fn_last else "├── "
-                    route = sub["functions"][fn].get("route", "")
-                    out.append(f"{next_pref}{fn_branch}{fn}(){('  route: '+route) if route else ''}")
+                continue
+
+            # ───────── Datei ──────────────────────────────────────────
+            out.append(f"{pref}{branch}{name}")
+
+            # Top-Level-Funktionen der Datei
+            funcs = sorted(sub.get("functions", {}))
+            for j, fn in enumerate(funcs):
+                fn_last    = j == len(funcs) - 1
+                fn_branch  = "└── " if fn_last else "├── "
+                fn_pref    = next_pref
+                route      = sub["functions"][fn].get("route", "")
+                out.append(
+                    f"{fn_pref}{fn_branch}{fn}(){('  route: '+route) if route else ''}"
+                )
+
+                # ───── Nested-Funktionen unterhalb von fn ────────────
+                nested = sorted(sub.get("nested", {}).get(fn, []))
+                if nested:
+                    nested_pref_base = fn_pref + ("    " if fn_last else "│   ")
+                    for k, inner in enumerate(nested):
+                        inner_last   = k == len(nested) - 1
+                        inner_branch = "└── " if inner_last else "├── "
+                        out.append(f"{nested_pref_base}{inner_branch}{inner}()")
+
         return out
+
 
     code_tree_str = "\n".join(fmt_dir(build_tree(code_tree)))
 
