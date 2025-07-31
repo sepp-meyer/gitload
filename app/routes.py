@@ -31,8 +31,6 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
         wirft das ZIP-Root weg:
             'sepp-meyer-gitload-…/app/routes.py' → 'app/routes.py'
         """
-        def trim(rel: str) -> str: #fake
-            return hello #fake
         
         parts = Path(rel).parts
         return "/".join(parts[1:]) if len(parts) > 1 else rel
@@ -96,21 +94,35 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
                 new_path = f"{path_so_far}/{child}" if path_so_far else child
                 render(child, sub, new_path, indent + "  ")
 
-        elif node:   # Liste der Top-Level-Funktionen der Datei
+        elif node:                   # Liste der Top-Level-Funktionen der Datei
             nested_map = trim2meta.get(path_so_far, {}).get("nested", {})
+
+            # --------------------------------------------------------
+            # rekursiv eine Funktion (und ihre Kinder) ausgeben
+            # --------------------------------------------------------
+            def render_fn(fn_name: str,
+                          alias_prefix: str,
+                          indent_fn: str) -> None:
+                # alle direkten Kinder dieser Funktion
+                children = nested_map.get(fn_name, [])
+
+                cur_alias_prefix = f"{alias_prefix}__{fn_name}" \
+                                   if alias_prefix else f"{path_so_far}__{fn_name}"
+                cur_alias = esc(cur_alias_prefix)
+
+                if children:                         # → eigenes Paket
+                    lines.append(f'{indent_fn}package "{fn_name}()" as {cur_alias} {{')
+                    next_indent = indent_fn + "  "
+                    for child in sorted(children):
+                        render_fn(child, cur_alias_prefix, next_indent)
+                    lines.append(f'{indent_fn}}}')
+                else:                               # → einfache Komponente
+                    lines.append(f'{indent_fn}component "{fn_name}()" as {cur_alias}')
+
+            # alle Top-Level-Funktionen der Datei abarbeiten
             for fn in sorted(node):
-                if nested_map.get(fn):
-                    # Parent-Funktion als eigenes Package
-                    pkg_alias = esc(f"{path_so_far}__{fn}")
-                    lines.append(f'{indent}  package "{fn}()" as {pkg_alias} {{')
-                    for inner in sorted(nested_map[fn]):
-                        inner_alias = esc(f"{path_so_far}__{fn}__{inner}")
-                        lines.append(f'{indent}    component "{inner}()" as {inner_alias}')
-                    lines.append(f'{indent}  }}')
-                else:
-                    # einfache Komponente
-                    fn_alias = esc(f"{path_so_far}__{fn}")
-                    lines.append(f'{indent}  component "{fn}()" as {fn_alias}')
+                render_fn(fn, "", indent + "  ")
+
 
         else:
             # Datei ohne Funktionen
@@ -286,27 +298,39 @@ def select_files():
 
 @bp.route("/full_output", methods=["POST"])
 def full_output():
+    # ------------------------------------------------------------------
+    # 0) Basisdaten
+    # ------------------------------------------------------------------
     settings    = utils.read_settings()
     token       = settings.get("token", "")
     project_key = session.get("project")
     if not token or not project_key:
         return redirect(url_for("main.project"))
 
-    # Ausgewählte Dateien aus dem vorherigen Formular
     selected_paths = request.form.getlist("selected_paths")
+    repo_url       = settings["projects"].get(project_key)
 
-    repo_url = settings["projects"].get(project_key)
+    # ------------------------------------------------------------------
+    # 1) ZIP laden  +  Analyse  (abfangen aller Fehler)
+    # ------------------------------------------------------------------
+    try:
+        structure_str, content_str, analysis_rows, code_tree, \
+            alias_warnings, import_conflicts = utils.get_zip_full_output(
+                repo_url, token, selected_paths, analyse=True
+        )
+    except Exception as exc:
+        print("[gitload] Analyse-Fehler:", exc)      # Konsole
+        return render_template("full_output.html",   # 👉 gültige Response
+                               error=f"Analyse-Fehler: {exc}")
 
-    # ZIP immer mit Analyse laden (alle Tabs befüllen)
-    # ⇩ Neu: alias_warnings zusätzlich
-    structure_str, content_str, analysis_rows, code_tree, alias_warnings, import_conflicts = (
-        utils.get_zip_full_output(repo_url, token,
-                                  selected_paths, analyse=True)
-    )
+    # Wenn get_zip_full_output() explizit None liefert
     if structure_str is None:
         return render_template("full_output.html",
                                error="Fehler beim Laden.")
 
+    # ------------------------------------------------------------------
+    # 2) Daten für die Tabs aufbereiten  (UNVERÄNDERT)
+    # ------------------------------------------------------------------
     # ── Imports sammeln ───────────────────────────────────────────
     imports_rows = [
         {"file": rel, **imp}
@@ -348,54 +372,56 @@ def full_output():
             ptr[parts[-1]] = info
         return root
 
-    def fmt_dir(node: dict, pref: str = "") -> list[str]:
-        """
-        Erzeugt einen ASCII-Baum der Dateien/Funktionen.
-        Nested-Funktionen werden eingerückt unter ihrer Eltern-Funktion
-        dargestellt.
+def fmt_dir(node: dict, pref: str = "") -> list[str]:
+    """
+    Erzeugt einen ASCII-Baum der Dateien/Funktionen.
+    Mehrstufig verschachtelte Funktionen werden beliebig tief
+    eingerückt ausgegeben.
+    """
+    out: list[str] = []
+    keys = sorted(node)
 
-        node : Teilbaum aus code_tree
-        pref : bereits vorhandener Einrück-Prefix (│/└──/├──)
-        """
-        out: list[str] = []
-        keys = sorted(node)
+    for i, name in enumerate(keys):
+        last       = i == len(keys) - 1
+        branch     = "└── " if last else "├── "
+        next_pref  = pref + ("    " if last else "│   ")
+        sub        = node[name]
 
-        for i, name in enumerate(keys):
-            last       = i == len(keys) - 1
-            branch     = "└── " if last else "├── "
-            next_pref  = pref + ("    " if last else "│   ")
-            sub        = node[name]
+        # ───────── Ordner / Unterpakete ───────────────────────────
+        if isinstance(sub, dict) and "functions" not in sub:
+            out.append(f"{pref}{branch}{name}/")
+            out.extend(fmt_dir(sub, next_pref))
+            continue
 
-            # ───────── Ordner / Unterpakete ───────────────────────────
-            if isinstance(sub, dict) and "functions" not in sub:
-                out.append(f"{pref}{branch}{name}/")
-                out.extend(fmt_dir(sub, next_pref))
-                continue
+        # ───────── Datei ──────────────────────────────────────────
+        out.append(f"{pref}{branch}{name}")
 
-            # ───────── Datei ──────────────────────────────────────────
-            out.append(f"{pref}{branch}{name}")
+        # Hilfsfunktion für rekursive Ausgabe einer Funktion
+        def print_fn(fn_name: str,
+                     nested_map: dict[str, list[str]],
+                     prefix: str,
+                     is_last: bool) -> None:
+            route = sub["functions"][fn_name].get("route", "")
+            fn_branch = "└── " if is_last else "├── "
+            out.append(f"{prefix}{fn_branch}{fn_name}()"
+                       f"{('  route: '+route) if route else ''}")
 
-            # Top-Level-Funktionen der Datei
-            funcs = sorted(sub.get("functions", {}))
-            for j, fn in enumerate(funcs):
-                fn_last    = j == len(funcs) - 1
-                fn_branch  = "└── " if fn_last else "├── "
-                fn_pref    = next_pref
-                route      = sub["functions"][fn].get("route", "")
-                out.append(
-                    f"{fn_pref}{fn_branch}{fn}(){('  route: '+route) if route else ''}"
-                )
+            kids = sorted(nested_map.get(fn_name, []))
+            if not kids:
+                return
 
-                # ───── Nested-Funktionen unterhalb von fn ────────────
-                nested = sorted(sub.get("nested", {}).get(fn, []))
-                if nested:
-                    nested_pref_base = fn_pref + ("    " if fn_last else "│   ")
-                    for k, inner in enumerate(nested):
-                        inner_last   = k == len(nested) - 1
-                        inner_branch = "└── " if inner_last else "├── "
-                        out.append(f"{nested_pref_base}{inner_branch}{inner}()")
+            kid_pref_base = prefix + ("    " if is_last else "│   ")
+            for k, kid in enumerate(kids):
+                kid_last = k == len(kids) - 1
+                print_fn(kid, nested_map, kid_pref_base, kid_last)
 
-        return out
+        nested_map = sub.get("nested", {})
+        funcs = sorted(sub.get("functions", {}))
+        for j, fn in enumerate(funcs):
+            fn_last = j == len(funcs) - 1
+            print_fn(fn, nested_map, next_pref, fn_last)
+
+    return out
 
 
     code_tree_str = "\n".join(fmt_dir(build_tree(code_tree)))
@@ -409,7 +435,9 @@ def full_output():
         "Einsicht in die Dateien:\n" + content_str
     )
 
-    # ── Ergebnis rendern ───────────────────────────────────────────
+    # ------------------------------------------------------------------
+    # 3) Endgültiges Rendering
+    # ------------------------------------------------------------------
     return render_template(
         "full_output.html",
         combined_text     = combined_text,
@@ -421,7 +449,7 @@ def full_output():
         code_tree_str     = code_tree_str,
         uml_code          = uml_code,
         alias_warnings    = alias_warnings,
-        import_conflicts = import_conflicts,
+        import_conflicts  = import_conflicts,
     )
 
 
