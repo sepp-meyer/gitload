@@ -40,7 +40,7 @@ class PythonAnalyzer(BaseAnalyzer):
               ...
           },
           "imports": [...],
-          "aliases": { "alias": "voller.modul.pfad" }   # 🔄 neu
+          "aliases": { "alias": "voller.modul.pfad" }
         }
     """
 
@@ -78,7 +78,7 @@ class PythonAnalyzer(BaseAnalyzer):
         out: Dict = {
             "functions": {},
             "imports":   self._collect_imports(tree),
-            "aliases":   self._collect_aliases(tree),   # 🔄
+            "aliases":   self._collect_aliases(tree),
         }
 
         for node in ast.walk(tree):
@@ -86,34 +86,36 @@ class PythonAnalyzer(BaseAnalyzer):
                 continue
 
             meta = {
-                "route": self._extract_route(node.decorator_list),
-                "calls": self._collect_calls(node),
-                "out_calls": [],                        # 🔄 Platzhalter
+                "route":    self._extract_route(node.decorator_list),
+                "calls":    self._collect_calls(node),
+                "out_calls": [],
             }
             out["functions"][node.name] = meta
 
         return out
-    
-        # in app/analyzer.py, ergänze in PythonAnalyzer:
-        def analyse_aliases(self, rel_path: str, text: str) -> list[dict]:
-            """Findet alle `from … import … as …`-Statements mit Position."""
-            rows = []
-            try:
-                tree = ast.parse(text)
-            except SyntaxError:
-                return rows
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ImportFrom):
-                    for alias in node.names:
-                        if alias.asname:
-                            rows.append({
-                                "file": rel_path,
-                                "lineno": node.lineno,
-                                "module": (node.module or ""),
-                                "name": alias.name,
-                                "alias": alias.asname,
-                            })
+
+    # ------------------------------------------------ Alias-Analyse -
+    def analyse_aliases(self, rel_path: str, text: str) -> List[Dict]:
+        """Findet alle `from … import … as …`-Statements mit Position."""
+        rows: List[Dict] = []
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
             return rows
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                for alias in node.names:
+                    if alias.asname:
+                        rows.append({
+                            "file":   rel_path,
+                            "lineno": node.lineno,
+                            "module": module,
+                            "name":   alias.name,
+                            "alias":  alias.asname,
+                        })
+        return rows
 
     # -------------------------------- Hilfs-Methoden --------------
     def _extract_route(self, decorators):
@@ -160,7 +162,7 @@ class PythonAnalyzer(BaseAnalyzer):
         return imps
 
     def _collect_aliases(self, tree: ast.AST) -> Dict[str, str]:
-        """🔄 Alias-Tabelle auf Datei-Ebene (alias → voller.modul.pfad)."""
+        """Alias-Tabelle auf Datei-Ebene (alias → voller.modul.pfad)."""
         aliases: Dict[str, str] = {}
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -182,13 +184,10 @@ class PythonAnalyzer(BaseAnalyzer):
             p = getattr(p, "parent", None)
         return ""
 
-    
-
-
 
 # ───────── CSS-Analyzer (unverändert) ────────────────────────────
 class CSSAnalyzer(BaseAnalyzer):
-    _sel = re.compile(r"^\s*([^{]+?)\s*\{", re.MULTILINE)
+    _sel = re.compile(r"^\s*([^\{]+?)\s*\{", re.MULTILINE)
 
     def analyse(self, rel_path: str, text: str) -> List[Dict]:
         return [

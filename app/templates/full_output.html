@@ -147,7 +147,7 @@
           <strong>Zeile:</strong> {{ w.lineno }}<br>
           <code>from {{ w.module }} import {{ w.name }} as {{ w.alias }}</code><br>
           <small class="text-warning">
-            Alias-Import `{{ w.alias }}` für `{{ w.name }}` kann UML-Generator verwirren.
+            Alias-Import `{{ w.alias }}` für `{{ w.name }}` kann UML-Generator verwirren. Am besten im Code auf Alias-import verzichten und Funktion direkt aufrufen.
           </small>
         </li>
       {% endfor %}
