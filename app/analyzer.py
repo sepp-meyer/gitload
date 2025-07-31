@@ -31,16 +31,10 @@ class PythonAnalyzer(BaseAnalyzer):
     Analysiert .py-Dateien und liefert
 
         {
-          "functions": {
-              "funcname": {
-                  "route": "...",
-                  "calls": [... nur Namen ...],
-                  "out_calls": []   # wird erst später gefüllt
-              },
-              ...
-          },
-          "imports": [...],
-          "aliases": { "alias": "voller.modul.pfad" }
+          "functions": { funcname: { "route":..., "calls": [...], "out_calls": [...] }, ... },
+          "imports":   [...],
+          "aliases":   {...},
+          "nested":    { parent_func: [inner1, inner2, ...], ... }
         }
     """
 
@@ -73,30 +67,36 @@ class PythonAnalyzer(BaseAnalyzer):
         # Parent-Links für Klassenermittlung
         for parent in ast.walk(tree):
             for child in ast.iter_child_nodes(parent):
-                child.parent = parent
+                child.parent = parent  # type: ignore
 
-        out: Dict = {
-            "functions": {},
-            "imports":   self._collect_imports(tree),
-            "aliases":   self._collect_aliases(tree),
-        }
+        # 1) Nested-Funktionen sammeln
+        nested: Dict[str, List[str]] = defaultdict(list)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for child in node.body:
+                    if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        nested[node.name].append(child.name)
 
+        # 2) Funktionen und Metadaten aufbauen
+        functions: Dict[str, Dict] = {}
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-
-            meta = {
+            functions[node.name] = {
                 "route":    self._extract_route(node.decorator_list),
                 "calls":    self._collect_calls(node),
                 "out_calls": [],
             }
-            out["functions"][node.name] = meta
 
-        return out
+        return {
+            "functions": functions,
+            "imports":   self._collect_imports(tree),
+            "aliases":   self._collect_aliases(tree),
+            "nested":    nested,
+        }
 
     # ------------------------------------------------ Alias-Analyse -
     def analyse_aliases(self, rel_path: str, text: str) -> List[Dict]:
-        """Findet alle `from … import … as …`-Statements mit Position."""
         rows: List[Dict] = []
         try:
             tree = ast.parse(text)
@@ -162,7 +162,6 @@ class PythonAnalyzer(BaseAnalyzer):
         return imps
 
     def _collect_aliases(self, tree: ast.AST) -> Dict[str, str]:
-        """Alias-Tabelle auf Datei-Ebene (alias → voller.modul.pfad)."""
         aliases: Dict[str, str] = {}
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -185,7 +184,6 @@ class PythonAnalyzer(BaseAnalyzer):
         return ""
 
 
-# ───────── CSS-Analyzer (unverändert) ────────────────────────────
 class CSSAnalyzer(BaseAnalyzer):
     _sel = re.compile(r"^\s*([^\{]+?)\s*\{", re.MULTILINE)
 

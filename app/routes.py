@@ -25,7 +25,6 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
     from pathlib import Path
     from typing import Dict, List, Union
 
-    # ---------- Helper -------------------------------------------------
     def esc(path: str) -> str:
         return re.sub(r'[^A-Za-z0-9_]', '_', path)
 
@@ -33,7 +32,7 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
         parts = Path(rel).parts
         return "/".join(parts[1:]) if len(parts) > 1 else rel
 
-    # ---------- 1) Baum der Ordner / Dateien / Funktionen --------------
+    # 1) Baum der Dateien/Ordner
     Tree = dict[str, "Tree | list[str]"]
     root: Tree = {}
     for rel, meta in code_tree.items():
@@ -43,33 +42,49 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
             ptr = ptr.setdefault(folder, {})
         ptr[parts[-1]] = list(meta.get("functions", {}))
 
-    # ---------- 2) Komponenten rendern --------------------------------
+    # 2) Rendern
     lines: List[str] = [
         "@startuml",
         "left to right direction",
         'skinparam defaultFontName "Courier New"',
     ]
 
-    def render(name: str, node: Union["Tree", list[str]], path_so_far: str, indent: str = "") -> None:
+    def render(name: str, node: Union["Tree", list[str]], path_so_far: str, indent: str = ""):
         alias = esc(path_so_far or name)
         lines.append(f'{indent}package "{name}" as {alias} {{')
+
         if isinstance(node, dict):
+            # Unterpakete
             for child, sub in sorted(node.items()):
                 new = f"{path_so_far}/{child}" if path_so_far else child
                 render(child, sub, new, indent + "  ")
+
         elif node:
+            # Funktionen + Nested
+            nested = code_tree.get(path_so_far + ".py", {}).get("nested", {})
             for fn in sorted(node):
-                fn_alias = esc(f"{path_so_far}__{fn}")
-                lines.append(f'{indent}  component "{fn}" as {fn_alias}')
+                if nested.get(fn):
+                    pkg_alias = esc(f"{path_so_far}__{fn}")
+                    lines.append(f'{indent}  package "{fn}()" as {pkg_alias} {{')
+                    for inner in sorted(nested[fn]):
+                        inner_alias = esc(f"{path_so_far}__{fn}__{inner}")
+                        lines.append(f'{indent}    component "{inner}()" as {inner_alias}')
+                    lines.append(f'{indent}  }}')
+                else:
+                    fn_alias = esc(f"{path_so_far}__{fn}")
+                    lines.append(f'{indent}  component "{fn}()" as {fn_alias}')
+
         else:
+            # Datei ohne Funktionen
             placeholder = esc(f"{path_so_far}__file")
             lines.append(f'{indent}  component "{name}" as {placeholder}')
+
         lines.append(f"{indent}}}")
 
     for top, sub in sorted(root.items()):
         render(top, sub, top)
 
-    # ---------- 3) Internes Function→Alias-Mapping ---------------------
+    # 3) Alias-Map intern
     func2alias: Dict[str, str] = {}
     file_of_alias: Dict[str, str] = {}
     for rel, meta in code_tree.items():
@@ -79,31 +94,21 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
             func2alias[fn] = alias
             file_of_alias[alias] = mod_alias
 
-    # ---------- 4) Modul-Auflösung auf reinen Dateinamen -------------
+    # 4) Modul-Auflösung auf Dateinamen
     def resolve_module(origin: str, raw: str) -> str:
-        from pathlib import Path
-
-        # Ursprungspfad trimmen
         rel_trimmed = trim(origin)
         parts       = rel_trimmed.split('/')
         base        = Path("/".join(parts[:-1]))
-
-        # Relative Ebene hochsteigen (level-1)
         level = len(raw) - len(raw.lstrip('.'))
         name  = raw.lstrip('.')
         for _ in range(max(0, level - 1)):
             base = base.parent
-
-        # Restmodul anhängen
         if name:
             for part in name.split('.'):
                 base = base / part
+        return Path(base).stem
 
-        # Nur Dateinamen ohne .py-Suffix
-        fname = Path(base).name
-        return Path(fname).stem
-
-    # ---------- 5) Import-Map (Name→Dateiname) ------------------------
+    # 5) Import-Map Name→Dateiname
     name2module: Dict[str, str] = {}
     for origin, meta in code_tree.items():
         for imp in meta.get("imports", []):
@@ -117,7 +122,7 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
                 alias = imp.get("alias") or raw.split(".")[0]
                 name2module[alias] = canon
 
-    # ---------- 6) Externe Funktionen erkennen/filtern -------------
+    # 6) Externe Funktionen
     all_calls = {
         call
         for meta in code_tree.values()
@@ -128,12 +133,10 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
         call for call in all_calls
         if call not in func2alias and call in name2module
     )
-
-    # Alias für externe Funktionen
     for fn in external_fns:
         func2alias[fn] = esc(f"extern__{fn}")
 
-    # ---------- 7) Package “externe Funktionen” zeichnen ------------
+    # 7) Package “externe Funktionen”
     if external_fns:
         lines.append("")
         lines.append('package "externe Funktionen" as externe {')
@@ -151,7 +154,7 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
         lines.append("}")
         lines.append("")
 
-    # ---------- 8) Call-Kanten erzeugen -----------------------------
+    # 8) Call-Kanten
     added: set[tuple[str, str]] = set()
     for rel, meta in code_tree.items():
         for fn, fn_meta in meta.get("functions", {}).items():
