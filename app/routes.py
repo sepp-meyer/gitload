@@ -12,6 +12,9 @@ from app.services import settings_service, repo_service, uml_service
 
 bp = Blueprint("main", __name__)
 
+# ════════════════════════════════════════════════════════════════════════
+# 1) Start- und Projektauswahl
+# ════════════════════════════════════════════════════════════════════════
 @bp.route("/")
 def index():
     settings = settings_service.read_settings()
@@ -35,6 +38,9 @@ def project():
         return redirect(url_for("main.select_files"))
     return render_template("project.html", form=form)
 
+# ════════════════════════════════════════════════════════════════════════
+# 2) Dateiliste anzeigen
+# ════════════════════════════════════════════════════════════════════════
 @bp.route("/select_files")
 def select_files():
     settings    = settings_service.read_settings()
@@ -55,6 +61,9 @@ def select_files():
     return render_template("select_files.html",
                            flat_list=flat_list, project=project_key)
 
+# ════════════════════════════════════════════════════════════════════════
+# 3) Gesamtausgabe / Analyse / UML
+# ════════════════════════════════════════════════════════════════════════
 @bp.route("/full_output", methods=["POST"])
 def full_output():
     settings    = settings_service.read_settings()
@@ -67,8 +76,8 @@ def full_output():
     repo_url       = settings["projects"].get(project_key)
 
     try:
-        # Service Aufruf
-        (structure_str, content_str, analysis_rows, code_tree, 
+        # Service Aufruf (FIX: Jetzt mit handover_md als 3. Rückgabewert)
+        (structure_str, content_str, handover_md, analysis_rows, code_tree, 
          alias_warnings, import_conflicts) = repo_service.get_zip_full_output(
             repo_url, token, selected_paths, analyse=True
         )
@@ -79,9 +88,9 @@ def full_output():
     if structure_str is None:
         return render_template("full_output.html", error="Fehler beim Laden.")
 
-    # ── Daten für View aufbereiten
-    
-    # Imports
+    # ── Daten für View aufbereiten ────────────────────────────────────────
+
+    # Imports Tabelle vorbereiten
     imports_rows = [
         {"file": rel, **imp}
         for rel, info in code_tree.items()
@@ -97,7 +106,7 @@ def full_output():
             lines.append("\t".join(str(r.get(c, "")) for c in headers))
         imports_copy = "\n".join(lines)
 
-    # Funktionen Markdown
+    # Funktionen Markdown Tabelle
     if analysis_rows:
         known     = ["file", "func", "route", "class", "lineno"]
         col_order = [c for c in known if c in analysis_rows[0]] or list(analysis_rows[0].keys())
@@ -108,12 +117,13 @@ def full_output():
     else:
         col_order, analysis_markdown = [], ""
 
-    # Visualisierung (jetzt in utils)
+    # Visualisierung (Tree) via Utils
     code_tree_str = utils.format_directory_tree(code_tree)
     
-    # UML (jetzt im service)
+    # UML Generierung via Service
     uml_code = uml_service.build_package_uml(code_tree)
 
+    # Kombinierter Text für Tab 1
     combined_text = (
         "Struktur der ZIP-Datei:\n" + structure_str + "\n\n" +
         "Einsicht in die Dateien:\n" + content_str
@@ -122,6 +132,7 @@ def full_output():
     return render_template(
         "full_output.html",
         combined_text     = combined_text,
+        handover_md       = handover_md,      # <--- FIX: Hier wird es übergeben
         analysis_rows     = analysis_rows,
         analysis_markdown = analysis_markdown,
         col_order         = col_order,
@@ -133,6 +144,9 @@ def full_output():
         import_conflicts  = import_conflicts,
     )
 
+# ════════════════════════════════════════════════════════════════════════
+# 4) Einstellungen
+# ════════════════════════════════════════════════════════════════════════
 @bp.route("/settings", methods=["GET", "POST"])
 def settings_page():
     settings = settings_service.read_settings()
