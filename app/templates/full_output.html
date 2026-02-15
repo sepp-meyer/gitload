@@ -11,8 +11,14 @@
   
   <li class="nav-item">
     <a class="nav-link" id="handover-tab" data-toggle="tab"
-       href="#handover" role="tab">Projektübergabe</a>
+       href="#handover" role="tab">Markdown</a>
   </li>
+  
+  <li class="nav-item">
+    <a class="nav-link" id="clean-tab" data-toggle="tab"
+       href="#clean" role="tab">MD-no_comments</a>
+  </li>
+
   <li class="nav-item">
     <a class="nav-link" id="func-tab" data-toggle="tab"
        href="#func" role="tab">Funktionsübersicht</a>
@@ -60,6 +66,21 @@
                 style="padding-top:10px; font-family: monospace;">{{ handover_md }}</textarea>
     </div>
   </div>
+
+  <div class="tab-pane fade" id="clean" role="tabpanel">
+    <div class="position-relative">
+      <div class="alert alert-secondary py-1 mb-2">
+         <small>Kompakte Version: Kommentare und Docstrings in .py, .js, .html, .css entfernt.</small>
+      </div>
+      <button id="copyCleanBtn" class="btn btn-sm btn-info"
+              style="position:absolute; top:45px; right:10px;">
+        Kopieren
+      </button>
+      <textarea id="cleanText" class="form-control" rows="30" readonly
+                style="padding-top:10px; font-family: monospace;">{{ handover_clean_md }}</textarea>
+    </div>
+  </div>
+
   <div class="tab-pane fade" id="func" role="tabpanel">
     {% if analysis_rows %}
       {% set cols = col_order or analysis_rows[0].keys() %}
@@ -232,7 +253,8 @@ Hinweis: Symbol „{{ c.name }}“ wird aus unterschiedlichen Pfaden importiert.
   }
 
   copyFrom('copyTextBtn',     'outputText');
-  copyFrom('copyHandoverBtn', 'handoverText');  // <--- NEU
+  copyFrom('copyHandoverBtn', 'handoverText');
+  copyFrom('copyCleanBtn',    'cleanText');    // <--- NEU für MD-no_comments
   copyFrom('copyFuncBtn',     'funcCopyArea');
   copyFrom('copyImportBtn',   'importCopyArea');
   copyFrom('copyTreeBtn',     'treeText');

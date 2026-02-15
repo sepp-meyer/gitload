@@ -76,8 +76,8 @@ def full_output():
     repo_url       = settings["projects"].get(project_key)
 
     try:
-        # Service Aufruf (FIX: Jetzt mit handover_md als 3. Rückgabewert)
-        (structure_str, content_str, handover_md, analysis_rows, code_tree, 
+        # Service Aufruf (FIX: Jetzt mit handover_clean_md als 4. Rückgabewert)
+        (structure_str, content_str, handover_md, handover_clean_md, analysis_rows, code_tree, 
          alias_warnings, import_conflicts) = repo_service.get_zip_full_output(
             repo_url, token, selected_paths, analyse=True
         )
@@ -132,7 +132,8 @@ def full_output():
     return render_template(
         "full_output.html",
         combined_text     = combined_text,
-        handover_md       = handover_md,      # <--- FIX: Hier wird es übergeben
+        handover_md       = handover_md,
+        handover_clean_md = handover_clean_md, # <--- NEU übergeben
         analysis_rows     = analysis_rows,
         analysis_markdown = analysis_markdown,
         col_order         = col_order,

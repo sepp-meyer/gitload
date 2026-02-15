@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import zipfile
 import requests
 from requests.exceptions import RequestException
@@ -19,13 +20,58 @@ def _iterate_files_with_content(tree: Dict, base: str = ""):
             yield new_path, val
 
 # ════════════════════════════════════════════════════════════════════
-#  VERBESSERT: Hilfs-Generator: Repo-to-Markdown (Projektübergabe)
-#  (Logik aus deinem Fundstück übernommen: Dynamische Header-Tiefe)
+#  NEU: Hilfsfunktion zum Entfernen von Kommentaren
 # ════════════════════════════════════════════════════════════════════
-def _generate_markdown_handover(tree: Dict, structure_str: str) -> str:
+def _remove_comments(text: str, ext: str) -> str:
+    """
+    Entfernt Kommentare aus Quellcode basierend auf der Dateiendung.
+    """
+    if not text:
+        return ""
+    
+    clean_text = text
+
+    if ext == '.py':
+        # 1. Docstrings ("""...""" oder '''...''') entfernen
+        # (?s) aktiviert DOTALL, damit . auch Newlines matcht
+        clean_text = re.sub(r'(?s)("{3}|\'{3}).*?\1', '', clean_text)
+        
+        # 2. Zeilenkommentare (# ...) entfernen
+        clean_text = re.sub(r'#.*$', '', clean_text, flags=re.MULTILINE)
+
+    elif ext in ['.js', '.css']:
+        # 1. Block-Kommentare /* ... */
+        clean_text = re.sub(r'(?s)/\*.*?\*/', '', clean_text)
+        # 2. Zeilen-Kommentare //
+        # (?<!:) ist ein "Negative Lookbehind". Es verhindert, dass http:// gematcht wird.
+        clean_text = re.sub(r'(?<!:)//.*$', '', clean_text, flags=re.MULTILINE)
+        
+    elif ext == '.html':
+        # HTML ist speziell: Es kann HTML, JS und CSS Kommentare enthalten.
+        
+        # 1. HTML Kommentare clean_text = re.sub(r'(?s)', '', clean_text)
+        
+        # 2. JS/CSS Block Kommentare /* ... */ (in <script> oder <style>)
+        clean_text = re.sub(r'(?s)/\*.*?\*/', '', clean_text)
+        
+        # 3. JS Zeilen Kommentare // ... (in <script>)
+        # Auch hier schützen wir URLs durch (?<!:)
+        clean_text = re.sub(r'(?<!:)//.*$', '', clean_text, flags=re.MULTILINE)
+
+    # 3. Aufräumen: Mehrfache Leerzeilen, die durch Löschung entstanden sind, reduzieren
+    # Ersetze 3 oder mehr Newlines durch 2 Newlines
+    clean_text = re.sub(r'\n\s*\n\s*\n', '\n\n', clean_text)
+    
+    return clean_text.strip()
+
+# ════════════════════════════════════════════════════════════════════
+#  VERBESSERT: Hilfs-Generator: Repo-to-Markdown (Projektübergabe)
+# ════════════════════════════════════════════════════════════════════
+def _generate_markdown_handover(tree: Dict, structure_str: str, clean_mode: bool = False) -> str:
     """
     Erzeugt einen Markdown-String für LLM-Übergabe.
     Header-Tiefe (#) passt sich der Ordner-Tiefe an.
+    Wenn clean_mode=True, werden Kommentare entfernt.
     """
     lines = []
     
@@ -35,7 +81,8 @@ def _generate_markdown_handover(tree: Dict, structure_str: str) -> str:
         project_name = list(tree.keys())[0]
 
     # Header schreiben
-    lines.append(f"# Projekt /{project_name}")
+    suffix = " (No Comments)" if clean_mode else ""
+    lines.append(f"# Projekt /{project_name}{suffix}")
     lines.append("")
     lines.append("## Projektaufbau")
     lines.append("```")
@@ -75,18 +122,12 @@ def _generate_markdown_handover(tree: Dict, structure_str: str) -> str:
             visible_parts = parts
             clean_path = "/" + rel_path
 
-        # ─── NEU: Berechnung der Header-Tiefe ───
-        # Basis ist H2 (##). 
-        # 1 Element (z.B. /.gitignore) -> 1 + 1 = 2 (##)
-        # 2 Elemente (z.B. /app/init.py) -> 2 + 1 = 3 (###)
+        # ─── Header-Tiefe ───
         depth = len(visible_parts) + 1
-        
-        # Markdown unterstützt max H6 (######)
         if depth > 6:
             depth = 6
-            
         hashes = "#" * depth
-        # ────────────────────────────────────────
+        # ────────────────────
 
         # Sprache bestimmen
         ext = os.path.splitext(rel_path)[1].lower()
@@ -94,9 +135,14 @@ def _generate_markdown_handover(tree: Dict, structure_str: str) -> str:
         if rel_path.endswith("Dockerfile"):
             lang = "dockerfile"
         
+        # Inhalt vorbereiten (ggf. bereinigen)
+        final_content = content
+        if clean_mode and ext in ['.py', '.html', '.js', '.css']:
+            final_content = _remove_comments(content, ext)
+
         lines.append(f"{hashes} {clean_path}")
         lines.append(f"```{lang}")
-        lines.append(content)
+        lines.append(final_content)
         lines.append("```")
         lines.append("") # Leerzeile
 
@@ -126,7 +172,7 @@ def get_zip_full_output(
     token: str,
     selected_paths: Optional[List[str]] = None,
     analyse: bool = False,
-) -> Tuple[str, str, str, List[Dict], Dict, List[Dict], List[Dict]]:
+) -> Tuple[str, str, str, str, List[Dict], Dict, List[Dict], List[Dict]]:
     
     headers = {"Authorization": f"token {token}"}
     try:
@@ -134,7 +180,7 @@ def get_zip_full_output(
         response.raise_for_status()
     except RequestException as exc:
         print(f"[repo_service] Download-Fehler: {exc}")
-        return None, None, None, [], {}, [], []
+        return None, None, None, None, [], {}, [], []
 
     try:
         zip_file = zipfile.ZipFile(io.BytesIO(response.content))
@@ -197,8 +243,12 @@ def get_zip_full_output(
         structure_str = "\n".join(_fmt(tree_focus))
         content_str   = "\n".join(_fmt_content(tree_focus))
 
-        # ── HANDOVER MARKDOWN (Verbesserte Version)
-        handover_md = _generate_markdown_handover(tree_focus, structure_str)
+        # ── HANDOVER MARKDOWN 
+        # 1. Normal (mit Kommentaren)
+        handover_md = _generate_markdown_handover(tree_focus, structure_str, clean_mode=False)
+        
+        # 2. Clean (OHNE Kommentare)
+        handover_clean_md = _generate_markdown_handover(tree_focus, structure_str, clean_mode=True)
 
         # ── Analyse
         analysis_rows = []
@@ -262,7 +312,7 @@ def get_zip_full_output(
                         if call in code_tree.get(dst, {}).get("functions", {}):
                             fn_meta.setdefault("out_calls", []).append((dst, call))
 
-        return structure_str, content_str, handover_md, analysis_rows, code_tree, alias_warnings, import_conflicts
+        return structure_str, content_str, handover_md, handover_clean_md, analysis_rows, code_tree, alias_warnings, import_conflicts
 
     except zipfile.BadZipFile:
-        return None, None, None, [], {}, [], []
+        return None, None, None, None, [], {}, [], []
