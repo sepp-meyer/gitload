@@ -25,33 +25,47 @@ def _iterate_files_with_content(tree: Dict, base: str = ""):
             yield new_path, val
 
 # ════════════════════════════════════════════════════════════════════
-#  NEU: Hilfs-Generator: Repo-to-Markdown (Projektübergabe)
+#  Hilfs-Generator: Repo-to-Markdown (Projektübergabe)
 # ════════════════════════════════════════════════════════════════════
-def _generate_markdown_handover(tree: Dict) -> str:
+def _generate_markdown_handover(tree: Dict, structure_str: str) -> str:
     """
-    Erzeugt einen Markdown-String, der alle Dateien im Baum
-    mit Überschrift und Codeblock auflistet.
+    Erzeugt einen Markdown-String für LLM-Übergabe.
     """
     lines = []
-    # Mapping für Syntax-Highlighting
+    
+    # 1. Header und Tree
+    lines.append("# Projekt Übergabe")
+    lines.append("")
+    lines.append("## Projektaufbau")
+    lines.append("```")
+    lines.append(structure_str)
+    lines.append("```")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # 2. Mapping nur für die wichtigsten Sprachen
     ext_map = {
-        '.py': 'python', '.js': 'javascript', '.html': 'html', 
-        '.css': 'css', '.json': 'json', '.md': 'markdown', 
-        '.sql': 'sql', '.sh': 'bash', '.yml': 'yaml', '.yaml': 'yaml',
-        '.dockerfile': 'dockerfile', '.txt': 'text'
+        '.py': 'python', 
+        '.js': 'javascript', 
+        '.html': 'html', 
+        '.css': 'css'
     }
 
-    # Wir iterieren über den bereits gefilterten Baum
+    # 3. Dateien durchgehen
     for rel_path, content in _iterate_files_with_content(tree):
-        ext = os.path.splitext(rel_path)[1].lower()
-        
-        # Sprache bestimmen
-        if rel_path.endswith("Dockerfile"):
-            lang = "dockerfile"
+        # Pfad bereinigen: Erstes Segment (Root-Folder) entfernen
+        parts = rel_path.strip("/").split("/")
+        if len(parts) > 1:
+            clean_path = "/" + "/".join(parts[1:]) 
         else:
-            lang = ext_map.get(ext, "")
+            clean_path = "/" + rel_path
+
+        # Sprache bestimmen
+        ext = os.path.splitext(rel_path)[1].lower()
+        lang = ext_map.get(ext, "") 
         
-        lines.append(f"## {rel_path}")
+        lines.append(f"## {clean_path}")
         lines.append(f"```{lang}")
         lines.append(content)
         lines.append("```")
@@ -71,7 +85,7 @@ def get_zip_full_output(
 ) -> Tuple[
     str,                # Struktur-String
     str,                # Inhalt-String
-    str,                # NEU: Handover-Markdown (Position 3)
+    str,                # Handover-Markdown
     List[Dict],         # analysis_rows
     Dict,               # code_tree
     List[Dict],         # alias_warnings
@@ -83,14 +97,13 @@ def get_zip_full_output(
         response.raise_for_status()
     except RequestException as exc:
         print(f"[gitload] Download-Fehler: {exc}")
-        # Wichtig: Hier muss nun auch ein None für den neuen Wert zurückgegeben werden
         return None, None, None, [], {}, [], []
 
     try:
         zip_file = zipfile.ZipFile(io.BytesIO(response.content))
         full_tree: Dict = {}
         selected_tree: Dict = {}
-        filter_all = selected_paths is None  # True → „alle markiert“
+        filter_all = selected_paths is None
 
         # ── ZIP entpacken → verschachteltes Dict
         for info in zip_file.infolist():
@@ -122,18 +135,43 @@ def get_zip_full_output(
 
         tree_focus = selected_tree if not filter_all else full_tree
 
-        # ── Strings für Tabs 1 & 2
-        def _fmt(tree: Dict, lvl=0) -> List[str]:
-            ind = "  " * lvl
-            lines: List[str] = []
-            for k, v in tree.items():
-                if isinstance(v, dict):
-                    lines.append(f"{ind}/{k}")
-                    lines += _fmt(v, lvl + 1)
-                else:
-                    lines.append(f"{ind}- {k}")
+        # ── NEU: Visuelle Tree-Generierung (├── style)
+        def _render_tree(node: Dict, prefix: str = "") -> List[str]:
+            lines = []
+            keys = sorted(node.keys())
+            for i, key in enumerate(keys):
+                is_last = (i == len(keys) - 1)
+                connector = "└── " if is_last else "├── "
+                
+                lines.append(f"{prefix}{connector}{key}")
+                
+                val = node[key]
+                if isinstance(val, dict):
+                    # Ordner: Rekursion
+                    extension = "    " if is_last else "│   "
+                    lines.extend(_render_tree(val, prefix + extension))
             return lines
 
+        # Generiere den Struktur-String (Wurzelverzeichnis + Tree)
+        structure_lines = []
+        for root_name, root_content in tree_focus.items():
+            structure_lines.append(f"/{root_name}")
+            # Nur eine Ebene tiefer, damit wir nicht "/root/root" haben, 
+            # falls tree_focus direkt das dict ist.
+            if isinstance(root_content, dict):
+                # Starte Rekursion mit einem vertikalen Strich für die erste Ebene, 
+                # falls es mehrere Root-Elemente gäbe (hier meist nur eins)
+                structure_lines.extend(_render_tree(root_content, "│   " if len(tree_focus) > 1 else ""))
+            else:
+                # Fallback, falls Root direkt eine Datei ist (unwahrscheinlich bei ZIP)
+                pass
+        
+        structure_str = "\n".join(structure_lines)
+
+        # ── Alter Content-String (Flache Liste mit Inhalt für Tab 2)
+        # Hier behalten wir die einfache Einrückung bei oder nutzen auch den Tree,
+        # aber meist ist Tab 2 ("Einsicht") besser lesbar als flache Liste.
+        # Ich lasse es so wie vorher (Simple Indent), da dort Inhalte angezeigt werden.
         def _fmt_content(tree: Dict, lvl=0) -> List[str]:
             ind = "  " * lvl
             lines: List[str] = []
@@ -146,11 +184,10 @@ def get_zip_full_output(
                     lines.append(f'{ind}  "{v}"')
             return lines
 
-        structure_str = "\n".join(_fmt(tree_focus))
-        content_str   = "\n".join(_fmt_content(tree_focus))
+        content_str = "\n".join(_fmt_content(tree_focus))
 
-        # NEU: Markdown generieren
-        handover_md = _generate_markdown_handover(tree_focus)
+        # NEU: Markdown generieren (nutzt jetzt den schönen structure_str)
+        handover_md = _generate_markdown_handover(tree_focus, structure_str)
 
         # ── Analyse (Tabellen, Code-Baum)
         analysis_rows: List[Dict] = []
@@ -159,7 +196,6 @@ def get_zip_full_output(
         import_conflicts: List[Dict] = []
 
         if analyse:
-            # 1) Standard-Analyse und Alias-Erkennung
             for rel_path, text in _iterate_files_with_content(tree_focus):
                 suffix = Path(rel_path).suffix.lower()
                 analyzer = REGISTRY[suffix]
@@ -171,7 +207,6 @@ def get_zip_full_output(
 
             analysis_rows.sort(key=lambda r: (r["file"], r.get("lineno", 0)))
 
-            # 2) Funktions-Verknüpfungen
             def _alias_map(meta: Dict) -> Dict[str, str]:
                 aliases = {}
                 for imp in meta.get("imports", []):
@@ -204,14 +239,12 @@ def get_zip_full_output(
                             continue
                         fn_meta.setdefault("out_calls", []).append((dst_rel, call))
 
-            # ── Import-Konflikte erkennen
             imports_rows: List[Dict] = []
             for rel, info in code_tree.items():
                 for imp in info.get("imports", []):
                     row = {"file": rel, **imp}
                     imports_rows.append(row)
 
-            # Name → alle importierenden Module
             name2modules: Dict[str, set] = defaultdict(set)
             for imp in imports_rows:
                 name = imp.get("alias") or imp.get("name")
@@ -230,7 +263,6 @@ def get_zip_full_output(
                         "modules": sorted(mods),
                     })
 
-        # WICHTIG: Hier handover_md zurückgeben
         return structure_str, content_str, handover_md, analysis_rows, code_tree, alias_warnings, import_conflicts
 
     except zipfile.BadZipFile:
