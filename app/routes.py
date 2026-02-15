@@ -1,4 +1,3 @@
-# ────────────────────────────────────────────────────────────────────────
 # app/routes.py
 from __future__ import annotations
 from pathlib import Path
@@ -15,11 +14,8 @@ import re
 bp = Blueprint("main", __name__)
 
 # ───────────────────────────────────────────────────────────────────────
-#  Plant-UML-Generator  (Files → verschachtelte Packages,
-#                        Functions → Komponenten,
-#                        Calls     → Funktions-Kanten)
+#  Plant-UML-Generator
 # ───────────────────────────────────────────────────────────────────────
-# aktualisierte build_package_uml mit trim im resolve_module
 def build_package_uml(code_tree: Dict[str, dict]) -> str:
     # ── Hilfsfunktionen ──────────────────────────────────────────────
     def esc(s: str) -> str:
@@ -94,7 +90,7 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
                 new_path = f"{path_so_far}/{child}" if path_so_far else child
                 render(child, sub, new_path, indent + "  ")
 
-        elif node:                   # Liste der Top-Level-Funktionen der Datei
+        elif node:                    # Liste der Top-Level-Funktionen der Datei
             nested_map = trim2meta.get(path_so_far, {}).get("nested", {})
 
             # --------------------------------------------------------
@@ -110,7 +106,7 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
                                    if alias_prefix else f"{path_so_far}__{fn_name}"
                 cur_alias = esc(cur_alias_prefix)
 
-                if children:                         # → eigenes Paket
+                if children:                          # → eigenes Paket
                     lines.append(f'{indent_fn}package "{fn_name}()" as {cur_alias} {{')
                     next_indent = indent_fn + "  "
                     for child in sorted(children):
@@ -246,7 +242,7 @@ def build_package_uml(code_tree: Dict[str, dict]) -> str:
 
 
 # ════════════════════════════════════════════════════════════════════════
-# 1) Start- und Projekt­auswahl
+# 1) Start- und Projektauswahl
 # ════════════════════════════════════════════════════════════════════════
 @bp.route("/")
 def index():
@@ -314,7 +310,8 @@ def full_output():
     # 1) ZIP laden  +  Analyse  (abfangen aller Fehler)
     # ------------------------------------------------------------------
     try:
-        structure_str, content_str, analysis_rows, code_tree, \
+        # NEU: handover_md entgegennehmen
+        structure_str, content_str, handover_md, analysis_rows, code_tree, \
             alias_warnings, import_conflicts = utils.get_zip_full_output(
                 repo_url, token, selected_paths, analyse=True
         )
@@ -391,7 +388,7 @@ def full_output():
             # ─ Datei ─────────────────────────────────────────────────
             out.append(f"{pref}{branch}{name}")
 
-            # ---------------- Hilfs­funktion -------------------------
+            # ---------------- Hilfsfunktion -------------------------
             def print_fn(fn_name: str,
                          nested_map: dict[str, list[str]],
                          prefix: str,
@@ -446,6 +443,7 @@ def full_output():
     return render_template(
         "full_output.html",
         combined_text     = combined_text,
+        handover_md       = handover_md,    # <--- NEU übergeben
         analysis_rows     = analysis_rows,
         analysis_markdown = analysis_markdown,
         col_order         = col_order,
@@ -456,7 +454,6 @@ def full_output():
         alias_warnings    = alias_warnings,
         import_conflicts  = import_conflicts,
     )
-
 
 
 # ════════════════════════════════════════════════════════════════════════

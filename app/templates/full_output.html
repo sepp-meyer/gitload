@@ -1,14 +1,17 @@
-<!-- app/templates/full_output.html -->
 {% extends "base.html" %}
 
 {% block content %}
 <h2>Ergebnisansicht</h2>
 
-<!-- Tabs ---------------------------------------------------------- -->
 <ul class="nav nav-tabs" id="resultTab" role="tablist">
   <li class="nav-item">
     <a class="nav-link active" id="text-tab" data-toggle="tab"
        href="#text" role="tab">Files als Text</a>
+  </li>
+  
+  <li class="nav-item">
+    <a class="nav-link" id="handover-tab" data-toggle="tab"
+       href="#handover" role="tab">Projektübergabe</a>
   </li>
   <li class="nav-item">
     <a class="nav-link" id="func-tab" data-toggle="tab"
@@ -26,7 +29,6 @@
     <a class="nav-link" id="uml-tab" data-toggle="tab"
        href="#uml" role="tab">UML</a>
   </li>
-  <!-- Neuer Tab für Fehlerquellen -->
   <li class="nav-item">
     <a class="nav-link" id="errors-tab" data-toggle="tab"
        href="#errors" role="tab">Fehlerquellen</a>
@@ -34,7 +36,6 @@
 </ul>
 
 <div class="tab-content border border-top-0 p-3" id="resultTabContent">
-  <!-- 1) Textansicht ---------------------------------------------- -->
   <div class="tab-pane fade show active" id="text" role="tabpanel">
     <div class="position-relative">
       <button id="copyTextBtn" class="btn btn-sm btn-info"
@@ -46,7 +47,19 @@
     </div>
   </div>
 
-  <!-- 2) Funktionsübersicht --------------------------------------- -->
+  <div class="tab-pane fade" id="handover" role="tabpanel">
+    <div class="position-relative">
+      <div class="alert alert-secondary py-1 mb-2">
+         <small>Dieses Format ist optimiert für LLMs (Repo-to-Text): Dateiname als Überschrift + Codeblock.</small>
+      </div>
+      <button id="copyHandoverBtn" class="btn btn-sm btn-info"
+              style="position:absolute; top:45px; right:10px;">
+        Kopieren
+      </button>
+      <textarea id="handoverText" class="form-control" rows="30" readonly
+                style="padding-top:10px; font-family: monospace;">{{ handover_md }}</textarea>
+    </div>
+  </div>
   <div class="tab-pane fade" id="func" role="tabpanel">
     {% if analysis_rows %}
       {% set cols = col_order or analysis_rows[0].keys() %}
@@ -72,7 +85,6 @@
     {% endif %}
   </div>
 
-  <!-- 3) Import-Übersicht ----------------------------------------- -->
   <div class="tab-pane fade" id="imports" role="tabpanel">
     {% if imports_rows %}
       <div class="position-relative">
@@ -107,7 +119,6 @@
     {% endif %}
   </div>
 
-  <!-- 4) Codebaum -------------------------------------------------- -->
   <div class="tab-pane fade" id="tree" role="tabpanel">
     {% if code_tree_str %}
       <div class="position-relative">
@@ -122,7 +133,6 @@
     {% endif %}
   </div>
 
-  <!-- 5) UML-Ansicht --------------------------------------------- -->
   <div class="tab-pane fade" id="uml" role="tabpanel">
     {% if uml_code %}
       <div class="position-relative">
@@ -137,7 +147,6 @@
     {% endif %}
   </div>
 
-  <!-- 6) Fehlerquellen --------------------------------------------- -->
   <div class="tab-pane fade" id="errors" role="tabpanel">
     <div class="position-relative mb-2">
       <button id="copyErrorsBtn" class="btn btn-sm btn-info"
@@ -204,7 +213,6 @@ Hinweis: Symbol „{{ c.name }}“ wird aus unterschiedlichen Pfaden importiert.
   </div>
 </div>
 
-<!-- Bootstrap-JS -------------------------------------------------- -->
 <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
 <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
@@ -223,11 +231,12 @@ Hinweis: Symbol „{{ c.name }}“ wird aus unterschiedlichen Pfaden importiert.
     });
   }
 
-  copyFrom('copyTextBtn',   'outputText');
-  copyFrom('copyFuncBtn',   'funcCopyArea');
-  copyFrom('copyImportBtn', 'importCopyArea');
-  copyFrom('copyTreeBtn',   'treeText');
-  copyFrom('copyUmlBtn',    'umlText');
-  copyFrom('copyErrorsBtn', 'errorsCopyArea');
+  copyFrom('copyTextBtn',     'outputText');
+  copyFrom('copyHandoverBtn', 'handoverText');  // <--- NEU
+  copyFrom('copyFuncBtn',     'funcCopyArea');
+  copyFrom('copyImportBtn',   'importCopyArea');
+  copyFrom('copyTreeBtn',     'treeText');
+  copyFrom('copyUmlBtn',      'umlText');
+  copyFrom('copyErrorsBtn',   'errorsCopyArea');
 </script>
 {% endblock %}

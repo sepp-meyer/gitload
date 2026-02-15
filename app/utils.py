@@ -6,8 +6,6 @@ import zipfile
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from collections import defaultdict
-
-
 import requests
 from requests.exceptions import RequestException
 
@@ -26,24 +24,58 @@ def _iterate_files_with_content(tree: Dict, base: str = ""):
         else:
             yield new_path, val
 
+# ════════════════════════════════════════════════════════════════════
+#  NEU: Hilfs-Generator: Repo-to-Markdown (Projektübergabe)
+# ════════════════════════════════════════════════════════════════════
+def _generate_markdown_handover(tree: Dict) -> str:
+    """
+    Erzeugt einen Markdown-String, der alle Dateien im Baum
+    mit Überschrift und Codeblock auflistet.
+    """
+    lines = []
+    # Mapping für Syntax-Highlighting
+    ext_map = {
+        '.py': 'python', '.js': 'javascript', '.html': 'html', 
+        '.css': 'css', '.json': 'json', '.md': 'markdown', 
+        '.sql': 'sql', '.sh': 'bash', '.yml': 'yaml', '.yaml': 'yaml',
+        '.dockerfile': 'dockerfile', '.txt': 'text'
+    }
+
+    # Wir iterieren über den bereits gefilterten Baum
+    for rel_path, content in _iterate_files_with_content(tree):
+        ext = os.path.splitext(rel_path)[1].lower()
+        
+        # Sprache bestimmen
+        if rel_path.endswith("Dockerfile"):
+            lang = "dockerfile"
+        else:
+            lang = ext_map.get(ext, "")
+        
+        lines.append(f"## {rel_path}")
+        lines.append(f"```{lang}")
+        lines.append(content)
+        lines.append("```")
+        lines.append("") # Leerzeile
+
+    return "\n".join(lines)
+
 
 # ════════════════════════════════════════════════════════════════════
 #  Haupt-Routine: ZIP laden → Struktur / Inhalt / Analyse
 # ════════════════════════════════════════════════════════════════════
-
-
 def get_zip_full_output(
     repo_url: str,
     token: str,
     selected_paths: Optional[List[str]] = None,
     analyse: bool = False,
 ) -> Tuple[
-    str,               # Struktur-String
-    str,               # Inhalt-String
-    List[Dict],        # analysis_rows
-    Dict,              # code_tree
-    List[Dict],        # alias_warnings
-    List[Dict],        # import_conflicts
+    str,                # Struktur-String
+    str,                # Inhalt-String
+    str,                # NEU: Handover-Markdown (Position 3)
+    List[Dict],         # analysis_rows
+    Dict,               # code_tree
+    List[Dict],         # alias_warnings
+    List[Dict],         # import_conflicts
 ]:
     headers = {"Authorization": f"token {token}"}
     try:
@@ -51,7 +83,8 @@ def get_zip_full_output(
         response.raise_for_status()
     except RequestException as exc:
         print(f"[gitload] Download-Fehler: {exc}")
-        return None, None, [], {}, [], []
+        # Wichtig: Hier muss nun auch ein None für den neuen Wert zurückgegeben werden
+        return None, None, None, [], {}, [], []
 
     try:
         zip_file = zipfile.ZipFile(io.BytesIO(response.content))
@@ -116,10 +149,14 @@ def get_zip_full_output(
         structure_str = "\n".join(_fmt(tree_focus))
         content_str   = "\n".join(_fmt_content(tree_focus))
 
+        # NEU: Markdown generieren
+        handover_md = _generate_markdown_handover(tree_focus)
+
         # ── Analyse (Tabellen, Code-Baum)
         analysis_rows: List[Dict] = []
         code_tree: Dict = {}
         alias_warnings: List[Dict] = []
+        import_conflicts: List[Dict] = []
 
         if analyse:
             # 1) Standard-Analyse und Alias-Erkennung
@@ -134,7 +171,7 @@ def get_zip_full_output(
 
             analysis_rows.sort(key=lambda r: (r["file"], r.get("lineno", 0)))
 
-            # 2) Funktions-Verknüpfungen (unverändert)
+            # 2) Funktions-Verknüpfungen
             def _alias_map(meta: Dict) -> Dict[str, str]:
                 aliases = {}
                 for imp in meta.get("imports", []):
@@ -167,40 +204,38 @@ def get_zip_full_output(
                             continue
                         fn_meta.setdefault("out_calls", []).append((dst_rel, call))
 
-        # ── Import-Konflikte erkennen
-        imports_rows: List[Dict] = []
-        for rel, info in code_tree.items():
-            for imp in info.get("imports", []):
-                row = {"file": rel, **imp}
-                imports_rows.append(row)
+            # ── Import-Konflikte erkennen
+            imports_rows: List[Dict] = []
+            for rel, info in code_tree.items():
+                for imp in info.get("imports", []):
+                    row = {"file": rel, **imp}
+                    imports_rows.append(row)
 
-        # Name → alle importierenden Module
-        name2modules: Dict[str, set] = defaultdict(set)
-        for imp in imports_rows:
-            name = imp.get("alias") or imp.get("name")
-            if not name:
-                continue
-            name2modules[name].add(imp.get("module", ""))
+            # Name → alle importierenden Module
+            name2modules: Dict[str, set] = defaultdict(set)
+            for imp in imports_rows:
+                name = imp.get("alias") or imp.get("name")
+                if not name:
+                    continue
+                name2modules[name].add(imp.get("module", ""))
 
-        import_conflicts: List[Dict] = []
-        for imp in imports_rows:
-            name = imp.get("alias") or imp.get("name")
-            mods = name2modules.get(name, set())
-            if name and len(mods) > 1:
-                import_conflicts.append({
-                    "file":   imp["file"],
-                    "lineno": imp["lineno"],
-                    "name":   name,
-                    "modules": sorted(mods),
-                })
+            for imp in imports_rows:
+                name = imp.get("alias") or imp.get("name")
+                mods = name2modules.get(name, set())
+                if name and len(mods) > 1:
+                    import_conflicts.append({
+                        "file":    imp["file"],
+                        "lineno":  imp["lineno"],
+                        "name":    name,
+                        "modules": sorted(mods),
+                    })
 
-        return structure_str, content_str, analysis_rows, code_tree, alias_warnings, import_conflicts
+        # WICHTIG: Hier handover_md zurückgeben
+        return structure_str, content_str, handover_md, analysis_rows, code_tree, alias_warnings, import_conflicts
 
     except zipfile.BadZipFile:
         print("[gitload] ZIP-Datei fehlerhaft oder leer")
-        return None, None, [], {}, [], []
-
-
+        return None, None, None, [], {}, [], []
 
 
 # ════════════════════════════════════════════════════════════════════
