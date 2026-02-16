@@ -45,17 +45,16 @@ def _remove_comments(text: str, ext: str) -> str:
         # 2. Zeilen-Kommentare
         clean_text = re.sub(r'(?<!:)//.*$', '', clean_text, flags=re.MULTILINE)
 
-
     elif ext == '.html':
-            # Versuch: Nur einzeilige Kommentare entfernen
-            # Wir lassen (?s) weg, damit der Punkt . nicht über Zeilenumbrüche geht.
-            clean_text = re.sub(r'', '', clean_text)
-            
-            # JS/CSS Cleanups...
-            clean_text = re.sub(r'(?s)/\*.*?\*/', '', clean_text)
-            clean_text = re.sub(r'(?<!:)//.*$', '', clean_text, flags=re.MULTILINE)
+        # 1. HTML Kommentare (Dein exakter Regex)
+        # Findet nur, wenn es in einer Zeile steht.
+        clean_text = re.sub(r'<!\-\-.*?\-\->', '', clean_text)
+        
+        # 2. Zusätzlich JS/CSS Kommentare innerhalb von <script>/<style> entfernen
+        clean_text = re.sub(r'(?s)/\*.*?\*/', '', clean_text)
+        clean_text = re.sub(r'(?<!:)//.*$', '', clean_text, flags=re.MULTILINE)
 
-    # 3. Aufräumen: Mehrfache Leerzeilen reduzieren
+    # 3. Aufräumen: Mehrfache Leerzeilen reduzieren (Gilt jetzt für alle Dateien)
     clean_text = re.sub(r'\n\s*\n\s*\n', '\n\n', clean_text)
     
     return clean_text.strip()
