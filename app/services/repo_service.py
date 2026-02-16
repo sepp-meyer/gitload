@@ -22,6 +22,8 @@ def _iterate_files_with_content(tree: Dict, base: str = ""):
 # ════════════════════════════════════════════════════════════════════
 #  NEU: Hilfsfunktion zum Entfernen von Kommentaren
 # ════════════════════════════════════════════════════════════════════
+import re
+
 def _remove_comments(text: str, ext: str) -> str:
     """
     Entfernt Kommentare aus Quellcode basierend auf der Dateiendung.
@@ -32,34 +34,28 @@ def _remove_comments(text: str, ext: str) -> str:
     clean_text = text
 
     if ext == '.py':
-        # 1. Docstrings ("""...""" oder '''...''') entfernen
-        # (?s) aktiviert DOTALL, damit . auch Newlines matcht
+        # 1. Docstrings
         clean_text = re.sub(r'(?s)("{3}|\'{3}).*?\1', '', clean_text)
-        
-        # 2. Zeilenkommentare (# ...) entfernen
+        # 2. Zeilenkommentare
         clean_text = re.sub(r'#.*$', '', clean_text, flags=re.MULTILINE)
 
     elif ext in ['.js', '.css']:
-        # 1. Block-Kommentare /* ... */
+        # 1. Block-Kommentare
         clean_text = re.sub(r'(?s)/\*.*?\*/', '', clean_text)
-        # 2. Zeilen-Kommentare //
-        # (?<!:) ist ein "Negative Lookbehind". Es verhindert, dass http:// gematcht wird.
-        clean_text = re.sub(r'(?<!:)//.*$', '', clean_text, flags=re.MULTILINE)
-        
-    elif ext == '.html':
-        # HTML ist speziell: Es kann HTML, JS und CSS Kommentare enthalten.
-        
-        # 1. HTML Kommentare clean_text = re.sub(r'(?s)', '', clean_text)
-        
-        # 2. JS/CSS Block Kommentare /* ... */ (in <script> oder <style>)
-        clean_text = re.sub(r'(?s)/\*.*?\*/', '', clean_text)
-        
-        # 3. JS Zeilen Kommentare // ... (in <script>)
-        # Auch hier schützen wir URLs durch (?<!:)
+        # 2. Zeilen-Kommentare
         clean_text = re.sub(r'(?<!:)//.*$', '', clean_text, flags=re.MULTILINE)
 
-    # 3. Aufräumen: Mehrfache Leerzeilen, die durch Löschung entstanden sind, reduzieren
-    # Ersetze 3 oder mehr Newlines durch 2 Newlines
+
+    elif ext == '.html':
+            # Versuch: Nur einzeilige Kommentare entfernen
+            # Wir lassen (?s) weg, damit der Punkt . nicht über Zeilenumbrüche geht.
+            clean_text = re.sub(r'', '', clean_text)
+            
+            # JS/CSS Cleanups...
+            clean_text = re.sub(r'(?s)/\*.*?\*/', '', clean_text)
+            clean_text = re.sub(r'(?<!:)//.*$', '', clean_text, flags=re.MULTILINE)
+
+    # 3. Aufräumen: Mehrfache Leerzeilen reduzieren
     clean_text = re.sub(r'\n\s*\n\s*\n', '\n\n', clean_text)
     
     return clean_text.strip()
