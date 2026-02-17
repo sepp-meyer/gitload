@@ -10,6 +10,8 @@ from pathlib import Path
 
 # Import der Analyzer aus dem übergeordneten Modul
 from app.analyzer import REGISTRY
+# NEU: Importiere die Baum-Formatierung
+from app.utils import format_directory_tree
 
 def _iterate_files_with_content(tree: Dict, base: str = ""):
     for key, val in tree.items():
@@ -22,8 +24,6 @@ def _iterate_files_with_content(tree: Dict, base: str = ""):
 # ════════════════════════════════════════════════════════════════════
 #  NEU: Hilfsfunktion zum Entfernen von Kommentaren
 # ════════════════════════════════════════════════════════════════════
-import re
-
 def _remove_comments(text: str, ext: str) -> str:
     """
     Entfernt Kommentare aus Quellcode basierend auf der Dateiendung.
@@ -46,15 +46,14 @@ def _remove_comments(text: str, ext: str) -> str:
         clean_text = re.sub(r'(?<!:)//.*$', '', clean_text, flags=re.MULTILINE)
 
     elif ext == '.html':
-        # 1. HTML Kommentare (Dein exakter Regex)
-        # Findet nur, wenn es in einer Zeile steht.
+        # 1. HTML Kommentare
         clean_text = re.sub(r'<!\-\-.*?\-\->', '', clean_text)
         
         # 2. Zusätzlich JS/CSS Kommentare innerhalb von <script>/<style> entfernen
         clean_text = re.sub(r'(?s)/\*.*?\*/', '', clean_text)
         clean_text = re.sub(r'(?<!:)//.*$', '', clean_text, flags=re.MULTILINE)
 
-    # 3. Aufräumen: Mehrfache Leerzeilen reduzieren (Gilt jetzt für alle Dateien)
+    # 3. Aufräumen: Mehrfache Leerzeilen reduzieren
     clean_text = re.sub(r'\n\s*\n\s*\n', '\n\n', clean_text)
     
     return clean_text.strip()
@@ -211,18 +210,7 @@ def get_zip_full_output(
 
         tree_focus = selected_tree if not filter_all else full_tree
 
-        # ── Strings generieren (Helper lokal)
-        def _fmt(tree: Dict, lvl=0) -> List[str]:
-            ind = "  " * lvl
-            lines = []
-            for k, v in tree.items():
-                if isinstance(v, dict):
-                    lines.append(f"{ind}/{k}")
-                    lines += _fmt(v, lvl + 1)
-                else:
-                    lines.append(f"{ind}- {k}")
-            return lines
-
+        # ── Strings generieren (Inhalt)
         def _fmt_content(tree: Dict, lvl=0) -> List[str]:
             ind = "  " * lvl
             lines = []
@@ -235,35 +223,67 @@ def get_zip_full_output(
                     lines.append(f'{ind}  "{v}"')
             return lines
 
-        structure_str = "\n".join(_fmt(tree_focus))
-        content_str   = "\n".join(_fmt_content(tree_focus))
+        content_str = "\n".join(_fmt_content(tree_focus))
 
-        # ── HANDOVER MARKDOWN 
+        # ════════════════════════════════════════════════════════════════════
+        # ANALYSE & STRUKTUR (Geänderte Reihenfolge!)
+        # Wir führen die Analyse JETZT aus, damit wir den detaillierten Baum 
+        # (mit Funktionen) schon für die Markdown-Generierung nutzen können.
+        # ════════════════════════════════════════════════════════════════════
+        
+        analysis_rows = []
+        code_tree = {}
+        alias_warnings = []
+        import_conflicts = []
+
+        # Wir laufen über alle Dateien für die Analyse (auch wenn analyse=False, 
+        # holen wir zumindest den Tree für die Optik, sofern Analyzer vorhanden)
+        for rel_path, text in _iterate_files_with_content(tree_focus):
+            suffix = Path(rel_path).suffix.lower()
+            analyzer = REGISTRY[suffix]
+            
+            # Code Tree immer befüllen für die Visualisierung
+            if hasattr(analyzer, "analyse_tree"):
+                code_tree[rel_path] = analyzer.analyse_tree(rel_path, text)
+            else:
+                # Falls kein Analyzer für Dateityp da ist, leeren Eintrag, damit Datei existiert
+                code_tree[rel_path] = {} 
+
+            # Detaillierte Analyse nur wenn angefordert
+            if analyse:
+                analysis_rows.extend(analyzer.analyse(rel_path, text))
+                if hasattr(analyzer, "analyse_aliases"):
+                    alias_warnings.extend(analyzer.analyse_aliases(rel_path, text))
+
+        # ── Struktur-String generieren (jetzt mit format_directory_tree)
+        if code_tree:
+            structure_str = format_directory_tree(code_tree)
+        else:
+            # Fallback (sollte kaum eintreten, wenn Dateien da sind)
+            def _fmt_simple(tree: Dict, lvl=0) -> List[str]:
+                ind = "  " * lvl
+                lines = []
+                for k, v in tree.items():
+                    if isinstance(v, dict):
+                        lines.append(f"{ind}/{k}")
+                        lines += _fmt_simple(v, lvl + 1)
+                    else:
+                        lines.append(f"{ind}- {k}")
+                return lines
+            structure_str = "\n".join(_fmt_simple(tree_focus))
+
+        # ── HANDOVER MARKDOWN (Nutzt jetzt den detaillierten structure_str)
         # 1. Normal (mit Kommentaren)
         handover_md = _generate_markdown_handover(tree_focus, structure_str, clean_mode=False)
         
         # 2. Clean (OHNE Kommentare)
         handover_clean_md = _generate_markdown_handover(tree_focus, structure_str, clean_mode=True)
 
-        # ── Analyse
-        analysis_rows = []
-        code_tree = {}
-        alias_warnings = []
-        import_conflicts = []
-
+        # ── Nacharbeiten Analyse (Sortierung, Konflikte)
         if analyse:
-            for rel_path, text in _iterate_files_with_content(tree_focus):
-                suffix = Path(rel_path).suffix.lower()
-                analyzer = REGISTRY[suffix]
-                analysis_rows.extend(analyzer.analyse(rel_path, text))
-                if hasattr(analyzer, "analyse_tree"):
-                    code_tree[rel_path] = analyzer.analyse_tree(rel_path, text)
-                if hasattr(analyzer, "analyse_aliases"):
-                    alias_warnings.extend(analyzer.analyse_aliases(rel_path, text))
-
             analysis_rows.sort(key=lambda r: (r["file"], r.get("lineno", 0)))
 
-            # ── Import Konflikte
+            # Import Konflikte
             imports_rows = [
                 {"file": rel, **imp} for rel, info in code_tree.items() 
                 for imp in info.get("imports", [])
